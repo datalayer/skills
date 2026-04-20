@@ -1,6 +1,6 @@
 ---
 name: datalayer-whoami
-description: Query the authenticated user's profile from the Datalayer IAM service. Requires a Datalayer account and authentication token. Returns user handle, email, roles, and linked accounts.
+description: Query the authenticated user's profile from the Datalayer IAM service. Requires a Datalayer account and API key. Returns user handle, email, roles, and linked accounts.
 license: BSD-3-Clause
 version: 1.0.0
 tags:
@@ -18,7 +18,7 @@ An authenticated user on the Datalayer platform is required to use this skill.
 
 ## Required Environment Variables
 
-- `DATALAYER_TOKEN` — Bearer token for Datalayer IAM authentication.
+- `DATALAYER_API_KEY` — API key for Datalayer IAM authentication.
 - `DATALAYER_RUN_URL` — Base URL of the Datalayer platform (e.g. `https://prod1.datalayer.run`).
 
 ## Invocation Contract
@@ -27,7 +27,7 @@ An authenticated user on the Datalayer platform is required to use this skill.
   - `skill_name`: `datalayer-whoami`
   - `script_name`: `whoami`
 - No positional `args` required.
-- Optional `kwargs`: `run_url`, `token` (override environment variables).
+- Optional `kwargs`: `run_url`, `api_key` (override environment variables).
 
 ## Scripts API
 
@@ -39,7 +39,7 @@ user profile as JSON.
 - `args`: none required
 - optional `kwargs`:
   - `run_url` — override `DATALAYER_RUN_URL`
-  - `token` — override `DATALAYER_TOKEN`
+  - `api_key` — override `DATALAYER_API_KEY`
 
 **Output:** JSON object with user profile fields:
 

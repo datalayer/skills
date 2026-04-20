@@ -4,15 +4,15 @@
 
 """Whoami script — fetch the authenticated user's Datalayer profile.
 
-Calls the Datalayer IAM ``GET /api/iam/v1/whoami`` endpoint and prints
-the user profile as a normalised JSON object.
+Uses the ``datalayer_core`` high-level client to call the Datalayer IAM
+whoami endpoint and prints the user profile as JSON.
 
 Usage:
-    python whoami.py [--run-url URL] [--token TOKEN]
+    python whoami.py [--run-url URL] [--api-key KEY]
 
 Environment:
     DATALAYER_RUN_URL  Base URL of the Datalayer platform.
-    DATALAYER_TOKEN    Bearer token for authentication.
+    DATALAYER_API_KEY  API key for authentication.
 """
 
 from __future__ import annotations
@@ -23,43 +23,36 @@ import os
 import sys
 
 
-def whoami(run_url: str, token: str) -> dict:
+def whoami(run_url: str, api_key: str) -> dict:
     """Fetch the current user's profile from Datalayer IAM.
+
+    Uses ``datalayer_core.client.client.DatalayerClient`` to call the
+    IAM whoami endpoint.
 
     Args:
         run_url: Base URL of the Datalayer platform
             (e.g. ``https://prod1.datalayer.run``).
-        token: Bearer token for IAM authentication.
+        api_key: API key for IAM authentication.
 
     Returns:
-        Normalised profile dict with keys: handle, email, first_name,
+        Profile dict with keys: handle, email, first_name,
         last_name, uid, roles, avatar_url.
     """
-    import httpx
+    from datalayer_core.client.client import DatalayerClient
+    from datalayer_core.utils.urls import DatalayerURLs
 
-    response = httpx.get(
-        f"{run_url.rstrip('/')}/api/iam/v1/whoami",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=30,
-    )
-    response.raise_for_status()
-    data = response.json()
+    urls = DatalayerURLs.from_environment(run_url=run_url)
+    client = DatalayerClient(urls=urls, token=api_key)
+    user = client.get_profile()
 
-    if not data or "profile" not in data:
-        print("Error: Invalid response from whoami API", file=sys.stderr)
-        sys.exit(1)
-
-    profile = data["profile"]
-
-    # Normalise Solr-style field names to human-friendly keys.
     return {
-        "handle": profile.get("handle_s", ""),
-        "email": profile.get("email_s", ""),
-        "first_name": profile.get("first_name_t", ""),
-        "last_name": profile.get("last_name_t", ""),
-        "uid": profile.get("uid", profile.get("id", "")),
-        "roles": profile.get("roles_ss", []),
-        "avatar_url": profile.get("avatar_url_s", ""),
+        "handle": user.handle,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "uid": user.uid,
+        "roles": user.roles,
+        "avatar_url": user.avatar_url_s,
     }
 
 
@@ -71,9 +64,9 @@ if __name__ == "__main__":
         help="Datalayer platform URL (default: $DATALAYER_RUN_URL)",
     )
     parser.add_argument(
-        "--token",
-        default=os.environ.get("DATALAYER_TOKEN", ""),
-        help="Bearer token (default: $DATALAYER_TOKEN)",
+        "--api-key",
+        default=os.environ.get("DATALAYER_API_KEY", ""),
+        help="API key (default: $DATALAYER_API_KEY)",
     )
     args = parser.parse_args()
 
@@ -83,12 +76,12 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
         sys.exit(1)
-    if not args.token:
+    if not args.api_key:
         print(
-            "Error: --token or DATALAYER_TOKEN is required",
+            "Error: --api-key or DATALAYER_API_KEY is required",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    result = whoami(args.run_url, args.token)
+    result = whoami(args.run_url, args.api_key)
     print(json.dumps(result, indent=2))

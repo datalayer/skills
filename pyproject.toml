@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "agent_skills",
-    "httpx>=0.27",
+    "datalayer_core",
 ]
 
 [project.optional-dependencies]
