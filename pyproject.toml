@@ -1,0 +1,59 @@
+# Copyright (c) 2025-2026 Datalayer, Inc.
+#
+# BSD 3-Clause License
+
+[build-system]
+requires = ["hatchling~=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "datalayer_skills"
+authors = [{ name = "Datalayer", email = "info@datalayer.io" }]
+dynamic = ["version"]
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["Datalayer", "AI", "Agents", "Skills"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: BSD License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "agent_skills",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+
+[project.license]
+file = "LICENSE"
+
+[project.urls]
+Home = "https://github.com/datalayer/skills"
+
+# ---- Entrypoint Registration ----
+# This is how agent-skills discovers skills from this package automatically.
+# Each key is a skill name, each value is a dotted Python module path
+# containing a SKILL.md file and an optional scripts/ directory.
+[project.entry-points."agent_skills.skills"]
+datalayer-whoami = "datalayer_skills.skills.whoami"
+
+[tool.hatch.version]
+path = "datalayer_skills/__version__.py"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["datalayer_skills"]
+# Include all non-Python data files (SKILL.md, scripts, etc.) from skills/
+artifacts = [
+  "datalayer_skills/skills/**/*.md",
+  "datalayer_skills/skills/**/*.txt",
+  "datalayer_skills/skills/**/scripts/*.py",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
