@@ -1,7 +1,7 @@
 header:
   license:
     content: |
-      Copyright (c) 2023-2024 Datalayer, Inc.
+      Copyright (c) 2025-2026 Datalayer, Inc.
 
       BSD 3-Clause License
 
@@ -9,10 +9,15 @@ header:
   paths-ignore:
     - '**/*.ipynb'
     - '**/*.json'
+    - '**/*.md'
+    - '**/*.toml'
+    - '**/*.txt'
     - '**/*.yaml'
     - '**/*.yml'
     - '**/.*'
+    - '**/__pycache__'
     - 'docs/**/*'
     - 'LICENSE'
+    - 'Makefile'
 
   comment: on-failure

@@ -11,4 +11,7 @@ This package provides skills that integrate with Datalayer platform services
 Available skills:
 
 - **whoami** — Query the authenticated user's profile from Datalayer IAM.
+- **memory-add**, **memory-search**, **memory-list**, **memory-delete** — keep,
+  search, list and forget the person's durable (mem0) memory of the agent,
+  through the agent runtime the skill runs beside.
 """

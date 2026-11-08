@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+lint = ["ruff"]
 
 [project.license]
 file = "LICENSE"
@@ -39,6 +40,10 @@ Home = "https://github.com/datalayer/skills"
 # containing a SKILL.md file and an optional scripts/ directory.
 [project.entry-points."agent_skills.skills"]
 datalayer-whoami = "datalayer_skills.skills.whoami"
+datalayer-memory-add = "datalayer_skills.skills.memory_add"
+datalayer-memory-search = "datalayer_skills.skills.memory_search"
+datalayer-memory-list = "datalayer_skills.skills.memory_list"
+datalayer-memory-delete = "datalayer_skills.skills.memory_delete"
 
 [tool.hatch.version]
 path = "datalayer_skills/__version__.py"
@@ -57,3 +62,7 @@ artifacts = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
