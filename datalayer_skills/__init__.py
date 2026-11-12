@@ -14,4 +14,7 @@ Available skills:
 - **memory-add**, **memory-search**, **memory-list**, **memory-delete** — keep,
   search, list and forget the person's durable (mem0) memory of the agent,
   through the agent runtime the skill runs beside.
+- **accounting**, **crawl**, **events**, **github**, **image**, **pdf**,
+  **text-summarizer**, **video** — the catalogue's skills, each with the
+  dependencies its scripts need in an extra (``skills-<name>``, ``skills`` for all).
 """

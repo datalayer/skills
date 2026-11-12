@@ -4,7 +4,8 @@
 name: Py Tests
 
 # The package's tests on every supported Python, and ruff. No secrets: the
-# memory skills run against a fake agent runtime on the loopback.
+# memory skills run against a fake agent runtime on the loopback, the
+# accounting scripts on small books, the video zoom on a generated clip.
 
 on:
   push:

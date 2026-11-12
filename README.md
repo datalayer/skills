@@ -20,6 +20,24 @@ points: install the package, and the skills are there.
 pip install datalayer-skills
 ```
 
+The skills' scripts run where the agent's sandbox runs. What a skill's scripts
+import is in an extra of its own, and `skills` brings them all:
+
+```bash
+pip install "datalayer-skills[skills]"            # every skill's dependencies
+pip install "datalayer-skills[skills-video]"      # one skill's
+python -m playwright install chromium             # once, for page snapshots and recordings
+```
+
+| Extra | Brings |
+|-------|--------|
+| `skills-accounting` | pandas |
+| `skills-crawl` | httpx, beautifulsoup4 |
+| `skills-github` | httpx |
+| `skills-pdf` | pypdf, pdf2image, Pillow |
+| `skills-image` | Pillow, Playwright |
+| `skills-video` | imageio-ffmpeg (an ffmpeg binary; the system's is used when present), Playwright |
+
 The Datalayer agent runtime image installs it, so an agent spec names these
 skills by their names (for example `datalayer-memory-add`) and the runtime
 loads them from the entry points, with no skill spec of their own.
@@ -33,6 +51,47 @@ loads them from the entry points, with no skill spec of their own.
 | `datalayer-memory-search` | `search` | The memories closest to a query |
 | `datalayer-memory-list` | `list_memories` | Every memory, newest first, with its id |
 | `datalayer-memory-delete` | `delete`, `delete_all` | Forget one memory by id, or everything once the person confirmed how many |
+| `accounting` | `reconcile`, `variance`, `aging`, `close_summary` | Two ledgers reconciled, two periods compared, open invoices aged, a trial balance closed, over CSV exports |
+| `crawl` | `fetch_page`, `fetch_js_page`, `extract_links`, `extract_tables`, `crawl_site`, `check_robots` | Pages fetched (rendered when they need JavaScript), their links and tables, a site walked within its robots.txt |
+| `events` | `event` | Events of an agent created, read, listed and updated |
+| `github` | `list_repos`, `get_repo`, `list_issues`, `list_prs`, `search_repos` | Repositories, issues and pull requests read from GitHub (needs a token) |
+| `image` | `image_info`, `resize_image`, `crop_image`, `convert_image`, `optimize_image`, `thumbnail_image`, `snapshot_page`, `snapshot_video_frame` | Snapshots of pages and video frames; images read, resized, cropped, converted, optimized and thumbnailed |
+| `pdf` | `check_fillable_fields`, `extract_form_field_info`, `fill_fillable_fields`, `fill_pdf_form_with_annotations`, `convert_pdf_to_images`, `check_bounding_boxes`, `create_validation_image` | PDF forms checked, their fields read and filled, pages turned to images |
+| `text-summarizer` | `summarize` | A text shortened to its key sentences or points |
+| `video` | `video_info`, `record_page`, `trim_video`, `zoom_video`, `transcode_video`, `optimize_video`, `video_thumbnail`, `video_to_gif`, `concat_videos` | Recordings of pages; videos read, trimmed, zoomed in and out, transcoded, optimized, framed, turned to GIF and joined |
+
+The eight last ones were bundled with agent-skills until its 1.3.0, as
+`agent_skills.skills.<name>`. They are `datalayer_skills.skills.<name>` now,
+under the same skill names, and agent-skills is the framework alone.
+
+## Zooming a video
+
+`zoom_video` zooms in on a point of a video and back out, once or several
+times, and keeps the video's size:
+
+```bash
+python datalayer_skills/skills/video/scripts/zoom_video.py demo.mp4 demo_zoom.mp4 \
+  "2-3-6-7-1.8-0.5-0.5|10-11-14-15-2.2-0.8-0.25" --ease smooth
+```
+
+A zoom is `s1-s2-s3-s4-f-x-y`: the zoom-in runs from `s1` to `s2` seconds, the
+picture stays zoomed until `s3`, the zoom-out is complete at `s4`; `f` is the
+factor (`2` doubles the picture), and `x`, `y` the point zoomed on, each from 0
+to 1 from the bottom-left corner. Several zooms are separated by `|`.
+
+| Option | What it does |
+|--------|--------------|
+| `--ease linear` | The zoom moves at a constant speed (when unsaid) |
+| `--ease smooth` | Each move starts and ends slowly |
+| `--trim START-END` | Cuts the video to those seconds first; the zooms' times then count from the trim's start |
+| `--crf N` | The quality, 18 when unsaid (lower is better and larger) |
+| `--preset NAME` | H.264's preset, `medium` when unsaid |
+
+Each frame is scaled by the factor of its time, then cropped back to the
+video's size around the point; near an edge the picture stops at the edge. An
+`.mp4` is H.264 with the audio copied, a `.webm` VP9 with Opus. Through an
+agent: `run_skill_script` with `skill_name` `video`, `script_name`
+`zoom_video`, and the same values in `args`.
 
 ## The memory skills
 
@@ -86,6 +145,8 @@ datalayer-memory-add = "datalayer_skills.skills.memory_add"
 datalayer-memory-search = "datalayer_skills.skills.memory_search"
 datalayer-memory-list = "datalayer_skills.skills.memory_list"
 datalayer-memory-delete = "datalayer_skills.skills.memory_delete"
+video = "datalayer_skills.skills.video"
+# … and one line per other skill
 ```
 
 Each value is a module that holds a `SKILL.md` and a `scripts/` directory.
@@ -101,10 +162,13 @@ pytest
 ```
 
 The tests run each memory script against a fake agent runtime on the
-loopback, and through agent-skills' toolset with an eval sandbox.
+loopback, and through agent-skills' toolset with an eval sandbox; the
+accounting scripts on small books; the video zoom's filter and arguments, and
+a zoom on a small generated clip where ffmpeg is installed.
 
 ## Release
 
-Set the version in `datalayer_skills/__version__.py`, merge to `main`, then
+Set the version in `datalayer_skills/__version__.py`, say what changed in
+`CHANGELOG.md`, merge to `main`, then
 push the tag `v<version>`. The Release workflow runs the tests, builds, and
 publishes to PyPI through trusted publishing (the `pypi` environment).
