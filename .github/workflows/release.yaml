@@ -74,10 +74,12 @@ jobs:
           set -euo pipefail
           wheel="$(ls dist/*.whl)"
           listing="$(unzip -l "$wheel")"
-          for skill in whoami memory_add memory_search memory_list memory_delete; do
+          for skill in whoami memory_add memory_search memory_list memory_delete accounting crawl events github image pdf text_summarizer video; do
             grep -q "datalayer_skills/skills/$skill/SKILL.md" <<<"$listing"
             grep -q "datalayer_skills/skills/$skill/scripts/" <<<"$listing"
           done
+          grep -q "datalayer_skills/skills/pdf/LICENSE.txt" <<<"$listing"
+          grep -q "datalayer_skills/skills/video/scripts/zoom_video.py" <<<"$listing"
           unzip -p "$wheel" '*.dist-info/entry_points.txt'
 
       - uses: actions/upload-artifact@v4

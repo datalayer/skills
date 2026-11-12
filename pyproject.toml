@@ -20,13 +20,34 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    "agent_skills",
+    # 1.3.0 reads a SKILL.md's `metadata.visibility`; from 1.4.0 agent-skills is the framework
+    # alone (and its `jokes` example), and the catalogue's skills live here.
+    "agent_skills>=1.3.0",
     "datalayer_core",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+# pandas and imageio-ffmpeg: the accounting scripts and the video zoom run in the tests.
+test = ["pytest>=7.0", "pytest-asyncio>=0.21", "pandas>=2.0", "imageio-ffmpeg>=0.5"]
 lint = ["ruff"]
+# Per-skill runtime dependencies: what a skill's scripts import where they run.
+skills-accounting = ["pandas>=2.0"]
+skills-crawl = ["httpx>=0.27", "beautifulsoup4>=4.12"]
+skills-github = ["httpx>=0.27"]
+skills-pdf = ["pypdf>=4.0", "pdf2image>=1.17", "Pillow>=10.0"]
+# Images: Pillow for the images, Playwright for a page's snapshot (run `python -m playwright install chromium` once).
+skills-image = ["Pillow>=10.0", "playwright>=1.45"]
+# Videos: ffmpeg through imageio-ffmpeg (the system's ffmpeg is used when present), Playwright for a page's recording.
+skills-video = ["imageio-ffmpeg>=0.5", "playwright>=1.45"]
+# Every skill's dependencies at once.
+skills = [
+    "datalayer_skills[skills-accounting]",
+    "datalayer_skills[skills-crawl]",
+    "datalayer_skills[skills-github]",
+    "datalayer_skills[skills-pdf]",
+    "datalayer_skills[skills-image]",
+    "datalayer_skills[skills-video]",
+]
 
 [project.license]
 file = "LICENSE"
@@ -44,6 +65,14 @@ datalayer-memory-add = "datalayer_skills.skills.memory_add"
 datalayer-memory-search = "datalayer_skills.skills.memory_search"
 datalayer-memory-list = "datalayer_skills.skills.memory_list"
 datalayer-memory-delete = "datalayer_skills.skills.memory_delete"
+accounting = "datalayer_skills.skills.accounting"
+crawl = "datalayer_skills.skills.crawl"
+events = "datalayer_skills.skills.events"
+github = "datalayer_skills.skills.github"
+image = "datalayer_skills.skills.image"
+pdf = "datalayer_skills.skills.pdf"
+text-summarizer = "datalayer_skills.skills.text_summarizer"
+video = "datalayer_skills.skills.video"
 
 [tool.hatch.version]
 path = "datalayer_skills/__version__.py"
@@ -58,6 +87,7 @@ artifacts = [
   "datalayer_skills/skills/**/*.md",
   "datalayer_skills/skills/**/*.txt",
   "datalayer_skills/skills/**/scripts/*.py",
+  "datalayer_skills/skills/**/LICENSE*",
 ]
 
 [tool.pytest.ini_options]
@@ -66,3 +96,16 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+# The pdf skill's reference pages keep their code samples as they were written.
+extend-exclude = ["datalayer_skills/skills/pdf/*.md"]
+
+[tool.ruff.lint.per-file-ignores]
+# The catalogue skills' scripts are command lines that answer any failure with a message.
+"datalayer_skills/skills/{accounting,crawl,events,github,image,pdf,text_summarizer,video}/scripts/*.py" = [
+  "BLE001",
+  "PLW1510",
+  "RUF013",
+  "SIM102",
+  "SIM118",
+  "TRY004",
+]
