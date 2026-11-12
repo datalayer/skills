@@ -112,7 +112,7 @@ def test_agent_skills_discovers_them_with_their_scripts() -> None:
     discovered = {
         skill.name: skill
         for skill in discover_entrypoint_skills()
-        if str(skill.path).startswith(str(SKILLS))
+        if "datalayer_skills" in Path(str(skill.path)).parts
     }
     for name, (_, scripts) in CATALOGUE.items():
         assert sorted(script.name for script in discovered[name].scripts) == sorted(scripts)
