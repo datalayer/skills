@@ -54,7 +54,7 @@ def _chromium() -> bool:
     try:
         with sync_playwright() as playwright:
             playwright.chromium.launch().close()
-    except Exception:
+    except Exception:  # noqa: BLE001 - any failure to launch is no Chromium here
         return False
     return True
 
@@ -165,7 +165,9 @@ def test_a_generated_recording_is_cut_zoomed_and_encoded_to_share(tmp_path: Path
     zooms = record_and_zoom.zooms_for("1-2-3-3.5-4-0.75-0.25", 4)
     # The first second is the page loading: cut.
     record_and_zoom.encode(str(clip), str(out), 1, 4, 320, 240, zooms, "smooth", 30, 20, "veryfast")
-    probe = subprocess.run([ffmpeg, "-i", str(out)], capture_output=True, text=True).stderr
+    probe = subprocess.run(
+        [ffmpeg, "-i", str(out)], capture_output=True, check=False, text=True
+    ).stderr
     assert "h264" in probe
     assert "yuv420p" in probe
     assert "320x240" in probe
