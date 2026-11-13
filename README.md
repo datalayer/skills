@@ -58,11 +58,35 @@ loads them from the entry points, with no skill spec of their own.
 | `image` | `image_info`, `resize_image`, `crop_image`, `convert_image`, `optimize_image`, `thumbnail_image`, `snapshot_page`, `snapshot_video_frame` | Snapshots of pages and video frames; images read, resized, cropped, converted, optimized and thumbnailed |
 | `pdf` | `check_fillable_fields`, `extract_form_field_info`, `fill_fillable_fields`, `fill_pdf_form_with_annotations`, `convert_pdf_to_images`, `check_bounding_boxes`, `create_validation_image` | PDF forms checked, their fields read and filled, pages turned to images |
 | `text-summarizer` | `summarize` | A text shortened to its key sentences or points |
-| `video` | `video_info`, `record_page`, `trim_video`, `zoom_video`, `transcode_video`, `optimize_video`, `video_thumbnail`, `video_to_gif`, `concat_videos` | Recordings of pages; videos read, trimmed, zoomed in and out, transcoded, optimized, framed, turned to GIF and joined |
+| `video` | `record_and_zoom`, `save_to_space`, `video_info`, `record_page`, `trim_video`, `zoom_video`, `transcode_video`, `optimize_video`, `video_thumbnail`, `video_to_gif`, `concat_videos` | Pages recorded and zoomed as an MP4 to share, kept in the person's Space; videos read, trimmed, zoomed in and out, transcoded, optimized, framed, turned to GIF and joined |
 
 The eight last ones were bundled with agent-skills until its 1.3.0, as
 `agent_skills.skills.<name>`. They are `datalayer_skills.skills.<name>` now,
 under the same skill names, and agent-skills is the framework alone.
+
+## Recording a page, zoomed, to share
+
+`record_and_zoom` records a page with a headless Chromium (from the moment it
+has loaded), zooms in and out on it with eased moves, and writes an MP4 anyone
+can play — H.264, yuv420p, `+faststart`, 30 frames a second:
+
+```bash
+python datalayer_skills/skills/video/scripts/record_and_zoom.py https://datalayer.ai hero.mp4 \
+  --seconds 8 --zoom "2-3-5-6-2-0.25-0.75"
+```
+
+With no `--zoom`, one zoom on the centre to 1.5x over the middle half of the
+recording; `--zoom none` keeps the page whole. The zooms are written as for
+`zoom_video` (below), their seconds counted from the page loaded.
+
+With `--save` (or `save_to_space <file>` for any file the skill made), the file
+is kept in the person's Datalayer Space: the script sends it to the agent
+runtime on the pod's loopback (`POST /api/v1/spaces/files`, agent-runtimes),
+which keeps it, with the identity it holds for the runtime's owner, in a Dataset
+of their default Space (`Videos` when unsaid; `--space`, `--folder`, `--name`,
+`--collection` choose others), listed under the Space's Contents. No token is
+asked for or sent. When no Space can be reached, the script says why and the
+local file stays.
 
 ## Zooming a video
 
@@ -164,7 +188,9 @@ pytest
 The tests run each memory script against a fake agent runtime on the
 loopback, and through agent-skills' toolset with an eval sandbox; the
 accounting scripts on small books; the video zoom's filter and arguments, and
-a zoom on a small generated clip where ffmpeg is installed.
+a zoom on a small generated clip where ffmpeg is installed; `record_and_zoom`'s
+encode of a generated recording, a real page recorded where Playwright's
+Chromium is installed, and `save_to_space` against a fake agent runtime.
 
 ## Release
 

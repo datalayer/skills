@@ -66,6 +66,8 @@ CATALOGUE = {
         [
             "video_info",
             "record_page",
+            "record_and_zoom",
+            "save_to_space",
             "trim_video",
             "zoom_video",
             "transcode_video",
