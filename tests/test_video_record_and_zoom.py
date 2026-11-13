@@ -383,3 +383,59 @@ def test_a_missing_or_empty_file_is_refused_before_any_call(tmp_path: Path) -> N
     done = run(SAVE, str(empty), "--runtime-url", "http://127.0.0.1:9")
     assert done.returncode == 1
     assert "is empty" in done.stderr
+
+
+def _broken_runtime(behaviour: str):
+    """A runtime that reads the request, then drops the line or stalls before its answer is whole."""
+    import socket
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    stop = threading.Event()
+
+    def serve() -> None:
+        connection, _ = server.accept()
+        connection.settimeout(5)
+        try:
+            data = b""
+            while b"\r\n\r\n" not in data:
+                data += connection.recv(65536)
+            if behaviour == "stall":
+                # A status and headers promising a body that never comes.
+                connection.sendall(
+                    b"HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"
+                )
+                stop.wait(10)
+            elif behaviour == "not-json":
+                body = b"<html>a proxy page</html>"
+                connection.sendall(
+                    b"HTTP/1.1 201 Created\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body)
+                )
+            # "drop": closes with no answer at all.
+        finally:
+            connection.close()
+            server.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return f"http://127.0.0.1:{server.getsockname()[1]}", stop
+
+
+@pytest.mark.parametrize(
+    "behaviour, said",
+    [("drop", "did not answer"), ("stall", "did not answer"), ("not-json", "not JSON")],
+)
+@pytest.mark.parametrize("script", [SAVE, RECORD], ids=["save_to_space", "record_and_zoom"])
+def test_a_runtime_that_drops_stalls_or_garbles_its_answer_is_a_refusal(
+    tmp_path: Path, behaviour: str, said: str, script: Path
+) -> None:
+    module = _load(script)
+    video = tmp_path / "demo.mp4"
+    video.write_bytes(b"video")
+    url, stop = _broken_runtime(behaviour)
+    try:
+        with pytest.raises(module.SpaceRefused, match=said):
+            module.save_to_space(str(video), runtime=url, timeout=1)
+    finally:
+        stop.set()
+    assert video.read_bytes() == b"video"

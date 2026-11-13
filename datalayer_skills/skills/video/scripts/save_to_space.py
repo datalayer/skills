@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import sys
 
@@ -97,7 +98,19 @@ def save_to_space(
             raise SpaceRefused(
                 f"The agent runtime at {base} cannot be reached: {error.reason}."
             ) from error
-    return json.loads(raw or b"{}")
+        except (OSError, http.client.HTTPException) as error:
+            # A runtime that stalls while answering, or drops the connection before
+            # it does (TimeoutError, RemoteDisconnected, IncompleteRead): refused
+            # like any other, so the local file is kept and said.
+            raise SpaceRefused(
+                f"The agent runtime at {base} did not answer: {type(error).__name__}."
+            ) from error
+    try:
+        return json.loads(raw or b"{}")
+    except ValueError as error:
+        raise SpaceRefused(
+            f"The agent runtime at {base} answered something that is not JSON."
+        ) from error
 
 
 # ---- End of the Space ----
