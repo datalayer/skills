@@ -17,6 +17,12 @@ import sys
 # "|". Each frame is scaled by the zoom's factor at its time, then cropped back to the video's
 # size around the point, the crop held inside the scaled frame.
 
+# ---- The zoom (the same block in zoom_video and record_and_zoom) ----
+#
+# A skill script is sent to the sandbox as its own source and run there, so it
+# imports nothing of this package: this block is repeated in each script that
+# zooms, and a test holds the copies identical.
+
 EASES = ("linear", "smooth")
 
 
@@ -126,6 +132,9 @@ def build_filter(width, height, zooms, ease="linear"):
             f"crop=w={width}:h={height}:x={escape(x)}:y={escape(y)}"
         )
     return ",".join(segments)
+
+
+# ---- End of the zoom ----
 
 
 def build_arguments(input_path, output_path, video_filter, trim=None, crf=18, preset="medium"):

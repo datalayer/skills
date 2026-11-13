@@ -1,14 +1,15 @@
 ---
 name: video
-description: Video toolkit for recordings of web pages, and videos read, trimmed, zoomed in and out on a point, transcoded, optimized for the web, thumbnailed, turned to GIF and joined.
+description: Video toolkit for recordings of web pages zoomed in and out as an MP4 ready to share and kept in the person's Datalayer Space, and videos read, trimmed, zoomed in and out on a point, transcoded, optimized for the web, thumbnailed, turned to GIF and joined.
 license: BSD 3-Clause. LICENSE has complete terms
-version: 1.1.0
+version: 1.2.0
 tags:
   - video
   - recording
   - ffmpeg
   - zoom
   - optimize
+  - space
 author: Datalayer
 metadata:
   visibility: public
@@ -18,9 +19,51 @@ metadata:
 
 Recordings of pages, and what is done to a video afterwards: read what it is,
 trim it, zoom in on a point and back out, transcode it, optimize it for the web,
-take its thumbnail, turn a clip into a GIF, join several. ffmpeg does the videos (`imageio-ffmpeg` brings a
+take its thumbnail, turn a clip into a GIF, join several, and keep it in the
+person's Datalayer Space. ffmpeg does the videos (`imageio-ffmpeg` brings a
 binary, or the system's is used); a page recording runs a headless Chromium
 through Playwright.
+
+## Record a page, zoom, share: the flow
+
+To show a page, use `record_and_zoom`: it records the page, zooms in and out on
+it, and writes an MP4 anyone can play, in one call.
+
+1. **Record** — a headless Chromium opens the page and records it. The seconds
+   of its loading are cut: second 0 of the video is the page loaded.
+2. **Zoom** — in on a point and back out, the moves eased (`smooth`). With no
+   `--zoom`, one zoom on the centre to 1.5x: in from a quarter of the
+   recording, held, out by three quarters. Name your own to show a button, a
+   chart or a line: the same `s1-s2-s3-s4-f-x-y` as `zoom_video`, its seconds
+   counted from the page loaded.
+3. **Encode** — H.264 in yuv420p with its index first (`+faststart`), at a
+   constant 30 frames a second: plays in every browser, phone and chat, and
+   starts before it is downloaded.
+4. **Keep** (with `--save`) — the MP4 goes into the person's Space (below); the
+   answer gives its link.
+
+To find a point, record once with `--zoom none`, take a frame with
+`video_thumbnail`, read where the subject is, and record again with the zoom.
+To zoom on a video you already have, use `zoom_video`.
+
+## Keep it in the person's Space
+
+`save_to_space` (or `--save` on `record_and_zoom`) keeps a file in the person's
+Datalayer Space: a Dataset of the Space (`Videos` when unsaid), created with
+its first file, listed on the Space's page under **Contents**. Each file saved
+makes a new revision of the Dataset that keeps the files already in it; a file
+saved again under the same name is its new version.
+
+- The script sends the file to the agent runtime on the pod's loopback
+  (`POST /api/v1/spaces/files`), which keeps it with the identity it holds for
+  the person whose runtime it is. No token is asked for or sent: the script can
+  reach only that person's Spaces.
+- The default Space when none is named; `--space` takes a Space's uid or
+  handle, `--folder` a folder in the Dataset, `--name` the file's name there,
+  `--collection` another Dataset.
+- When no Space can be reached — no default Space, a runtime without the
+  person's identity, Contents refusing — the script says why and exits with 1.
+  The local file stays where it is: say so, and give its path.
 
 ## Required Environment Variables
 
@@ -36,11 +79,37 @@ through Playwright.
 
 - Call `run_skill_script` with:
   - `skill_name`: `video`
-  - `script_name`: one of `video_info`, `record_page`, `trim_video`, `zoom_video`, `transcode_video`, `optimize_video`, `video_thumbnail`, `video_to_gif`, `concat_videos`
-- These scripts are positional-argument based. Use `args`, not `kwargs`; `zoom_video` also reads options (`--trim`, `--ease`, `--crf`, `--preset`), written in `args` after the positional ones.
+  - `script_name`: one of `record_and_zoom`, `save_to_space`, `video_info`, `record_page`, `trim_video`, `zoom_video`, `transcode_video`, `optimize_video`, `video_thumbnail`, `video_to_gif`, `concat_videos`
+- These scripts are positional-argument based. Use `args`, not `kwargs`; `record_and_zoom`, `save_to_space` and `zoom_video` also read options (`--zoom`, `--save`, `--trim`…), written in `args` after the positional ones.
 - Times are in seconds; the output container follows the output file's extension (`.mp4`, `.webm`, `.gif`, `.png`).
 
 ## Scripts API
+
+### `script_name: record_and_zoom`
+
+- `args`: `["<url>", "<output mp4>"]`, then the options:
+  - `"--seconds", "<10 when unsaid>"`, `"--width", "<1280>"`, `"--height", "<800>"` (made even)
+  - `"--zoom", "<auto when unsaid, none, or s1-s2-s3-s4-f-x-y zooms separated by |>"`
+  - `"--ease", "<smooth when unsaid, or linear>"`, `"--fps", "<30>"`, `"--crf", "<20>"`, `"--preset", "<medium>"`
+  - `"--wait-until", "<networkidle when unsaid, load, domcontentloaded or commit>"`
+  - `"--save"` to keep it in the Space, with `"--space", "<uid or handle>"`, `"--folder", "<folder>"`, `"--name", "<name>"`, `"--collection", "<Videos when unsaid>"`
+- Output: JSON — `output`, `seconds`, `width`, `height`, `fps`, `zooms`, `ease`, `load_cut_seconds`, `bytes`, and with `--save` `saved`: the Space, the Dataset, the `path` and the `url` to open it.
+- A zoom must end within the recording (`s4` at most `--seconds`).
+
+Examples:
+
+- Ten seconds of a page, the centre zoom, kept in the default Space:
+  `args`: `["https://datalayer.ai", "datalayer.mp4", "--save"]`
+- Eight seconds, a zoom to 2x on the upper-left quarter from 2 to 3 s, held until 5, out by 6, in a folder:
+  `args`: `["https://datalayer.ai", "hero.mp4", "--seconds", "8", "--zoom", "2-3-5-6-2-0.25-0.75", "--save", "--folder", "launch"]`
+- No zoom, a phone-sized recording:
+  `args`: `["https://datalayer.ai", "phone.mp4", "--width", "390", "--height", "844", "--zoom", "none"]`
+
+### `script_name: save_to_space`
+
+- `args`: `["<file>"]`, then the options: `"--name", "<its own when unsaid>"`, `"--folder", "<the Dataset's root when unsaid>"`, `"--space", "<uid or handle; the default Space when unsaid>"`, `"--collection", "<Videos when unsaid>"`
+- Output: JSON — `space` (`uid`, `handle`, `name`), `dataset` (`uid`, `name`), `path`, `object_uid`, `version_uid`, `revision_uid`, `bytes`, `media_type`, `url`.
+- Any file the skill made: an MP4, a GIF, a PNG thumbnail.
 
 ### `script_name: video_info`
 
@@ -50,7 +119,7 @@ through Playwright.
 ### `script_name: record_page`
 
 - `args`: `["<url>", "<output webm>", "<seconds, 10 when unsaid>", "<width, 1280 when unsaid>", "<height, 800 when unsaid>"]`
-- Output: a WebM of the page from its load, for that many seconds.
+- Output: a WebM of the page from its load, for that many seconds. To share it, prefer `record_and_zoom`, which writes an MP4.
 
 ### `script_name: trim_video`
 

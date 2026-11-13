@@ -6,6 +6,13 @@
 
 # Changelog
 
+## 0.4.0
+
+13 November 2026.
+
+- **Video: record a page, zoom, share.** The `video` skill's new `record_and_zoom` script records a page with a headless Chromium from the moment it has loaded (the blank seconds of its loading cut), zooms in and out on it with eased moves (`--zoom`: `auto` when unsaid, one zoom on the centre to 1.5x over the middle half; `none`; or `zoom_video`'s `s1-s2-s3-s4-f-x-y` zooms), and writes an MP4 anyone can play: H.264, yuv420p, `+faststart`, at a constant frame rate (`--fps`, 30). Options `--seconds`, `--width`, `--height`, `--ease` (`smooth`), `--crf`, `--preset`, `--wait-until`. It prints what it made as JSON.
+- **Video: kept in the person's Space.** `save_to_space <file>`, or `--save` on `record_and_zoom`, keeps a file in the person's Datalayer Space: it is sent to the agent runtime on the pod's loopback (`POST /api/v1/spaces/files`, agent-runtimes), which keeps it with the identity it holds for the runtime's owner in a Dataset of their default Space (`Videos` when unsaid; `--space`, `--folder`, `--name`, `--collection`), each file a new revision of the Dataset; the answer gives the Space, the Dataset, the path and the link. No token is asked for or sent. When no Space can be reached the script says why, exits with 1, and the local file stays.
+
 ## 0.3.0
 
 12 November 2026.
