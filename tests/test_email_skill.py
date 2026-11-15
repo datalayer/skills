@@ -36,6 +36,8 @@ class Mailer:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, dict]] = []
         self.refusal: tuple[int, str] | None = None
+        #: A raw answer (status, body bytes), or "drop" to close after the POST arrived.
+        self.raw: tuple[int, bytes] | str | None = None
 
 
 @pytest.fixture
@@ -48,6 +50,17 @@ def mailer():
                 self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}"
             )
             state.requests.append((self.command, self.path, body))
+            if state.raw == "drop":
+                self.close_connection = True
+                self.connection.shutdown(2)
+                return
+            if state.raw:
+                status, data = state.raw
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
             status, answer = (
                 (state.refusal[0], {"detail": state.refusal[1]})
                 if state.refusal
@@ -133,6 +146,44 @@ def test_an_unreachable_runtime_is_said(monkeypatch) -> None:
         and "cannot be reached" in done.stderr
         and "Nothing was sent" in done.stderr
     )
+
+
+UNCONFIRMED = "Delivery could not be confirmed"
+NOT_AGAIN = "Do not send it again"
+
+
+@pytest.mark.parametrize(
+    "raw, why",
+    [
+        # A gateway's 502 after the runtime may have sent it: no reason given.
+        ((502, b"<html>Bad Gateway</html>"), "answered 502 without saying why"),
+        ((500, b""), "answered 500 without saying why"),
+        # The runtime took the POST and closed the connection.
+        ("drop", "connection to the agent runtime ended"),
+        # A success whose body cannot be read.
+        ((200, b"{not json"), "is not JSON"),
+        ((200, b"null"), "does not say whether it was sent"),
+        ((200, b"[]"), "does not say whether it was sent"),
+        ((200, b'{"to": "me"}'), "does not say whether it was sent"),
+    ],
+)
+def test_an_unconfirmed_delivery_is_said_without_a_traceback_and_never_retried(
+    mailer, raw, why
+) -> None:
+    mailer.raw = raw
+    done = run("--subject", "s", "--text", "t")
+    assert done.returncode == 3, done.stderr
+    assert "Traceback" not in done.stderr
+    assert done.stderr.startswith(f"Error: {UNCONFIRMED}")
+    assert why in done.stderr and NOT_AGAIN in done.stderr
+    assert "Nothing was sent" not in done.stderr
+    assert len(mailer.requests) == 1
+
+
+def test_a_runtime_that_says_not_sent_is_a_refusal(mailer) -> None:
+    mailer.raw = (200, b'{"sent": false}')
+    done = run("--subject", "s", "--text", "t")
+    assert done.returncode == 1 and "was not sent" in done.stderr
 
 
 def test_there_is_no_recipient_argument() -> None:

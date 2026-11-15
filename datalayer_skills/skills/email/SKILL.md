@@ -68,3 +68,8 @@ sandbox or the runtime.
   or a deployment's), the account has no email address, the mailer could not
   send it just now. Say it to the person; never retry in a loop.
 - Exit code `2`: an unknown `kwargs` key or a missing one.
+- Exit code `3` with `Error: Delivery could not be confirmed: ...`: the runtime
+  may have sent the mail but did not confirm it (a gateway error with no reason,
+  a dropped connection, a timeout, an answer cut short). **Never send it
+  again**, even once: tell the person it may have gone and let them check
+  their inbox.

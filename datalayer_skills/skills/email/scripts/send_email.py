@@ -15,6 +15,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import errno
+import http.client
 import json
 import os
 import sys
@@ -29,6 +31,30 @@ MAX_TEXT = 20_000
 
 class MailRefused(Exception):
     """Why the mail was not sent, in the runtime's or Datalayer's sentence."""
+
+
+class MailUnconfirmed(Exception):
+    """The runtime may have sent the mail, but did not confirm it either way.
+
+    A gateway can answer 502 after the runtime sent the mail, the connection
+    can drop after the POST arrived, an answer can be cut short: none of these
+    proves nothing was sent, so none is a refusal, and the mail is never sent
+    again on its own.
+    """
+
+
+#: Said after every unconfirmed outcome, so the agent does not send it twice.
+UNCONFIRMED = (
+    "The mail may have been sent. Do not send it again; "
+    "tell the person and let them check their inbox."
+)
+
+#: Connection errors that happen before the request reaches the runtime.
+NOT_CONNECTED = (ConnectionRefusedError,)
+
+
+def _unconfirmed(why: str) -> MailUnconfirmed:
+    return MailUnconfirmed(f"Delivery could not be confirmed: {why}. {UNCONFIRMED}")
 
 
 def runtime_url(explicit: str = "") -> str:
@@ -62,22 +88,45 @@ def send_email(subject: str, text: str, base: str) -> dict:
         with opener.open(request, timeout=60) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
-        raw = error.read()
         try:
-            detail = json.loads(raw or b"{}").get("detail") or ""
+            raw = error.read()
+        except (OSError, http.client.HTTPException):
+            raw = b""
+        try:
+            body = json.loads(raw or b"null")
         except ValueError:
-            detail = raw.decode(errors="replace").strip()
-        if not isinstance(detail, str):
-            detail = json.dumps(detail)
-        raise MailRefused(
-            detail or f"The runtime answered {error.code}; nothing was sent."
-        ) from error
+            body = None
+        detail = body.get("detail") if isinstance(body, dict) else None
+        if isinstance(detail, str) and detail.strip():
+            # The runtime's own sentence: a refusal it confirms.
+            raise MailRefused(detail.strip()) from error
+        raise _unconfirmed(f"the runtime answered {error.code} without saying why") from error
     except urllib.error.URLError as error:
-        raise MailRefused(
-            f"The agent runtime at {base} cannot be reached: {error.reason}. Nothing was sent."
+        if (
+            isinstance(error.reason, NOT_CONNECTED)
+            or getattr(error.reason, "errno", None) == errno.ECONNREFUSED
+        ):
+            raise MailRefused(
+                f"The agent runtime at {base} cannot be reached: {error.reason}. Nothing was sent."
+            ) from error
+        raise _unconfirmed(
+            f"the agent runtime at {base} did not answer ({error.reason})"
         ) from error
-    answer = json.loads(raw or b"{}")
-    return {"sent": bool(answer.get("sent")), "to": answer.get("to", "me")}
+    except (OSError, http.client.HTTPException) as error:
+        # The connection dropped, timed out or was cut short after the POST left.
+        raise _unconfirmed(
+            f"the connection to the agent runtime ended before its answer ({type(error).__name__})"
+        ) from error
+    try:
+        answer = json.loads(raw)
+    except ValueError as error:
+        raise _unconfirmed("the runtime's answer is not JSON") from error
+    if not isinstance(answer, dict) or not isinstance(answer.get("sent"), bool):
+        raise _unconfirmed("the runtime's answer does not say whether it was sent")
+    if not answer["sent"]:
+        raise MailRefused("The runtime says the mail was not sent.")
+    to = answer.get("to")
+    return {"sent": True, "to": to if isinstance(to, str) and to else "me"}
 
 
 def main() -> dict:
@@ -101,3 +150,6 @@ if __name__ == "__main__":
     except MailRefused as refusal:
         print(f"Error: {refusal}", file=sys.stderr)
         sys.exit(1)
+    except MailUnconfirmed as unconfirmed:
+        print(f"Error: {unconfirmed}", file=sys.stderr)
+        sys.exit(3)
