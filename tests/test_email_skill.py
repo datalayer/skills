@@ -43,7 +43,7 @@ def mailer():
     state = Mailer()
 
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:  # noqa: N802 - the server's name
+        def do_POST(self) -> None:
             body = json.loads(
                 self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}"
             )
