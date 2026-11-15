@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.6.1
+
+15 November 2026.
+
+- **Email: an unconfirmed delivery is said, never reported as a failure.** `send_email` exits `3` with *Delivery could not be confirmed … Do not send it again* when the runtime may have sent the mail without confirming it: a gateway error with no reason of the runtime's, a dropped connection, a timeout, a body cut short or unreadable, an answer that does not say `sent`. Only the runtime's own refusal or a refused connection says nothing was sent (exit `1`). Never a traceback, never retried. The wait is `DATALAYER_EMAIL_TIMEOUT_SECONDS` (60 unless set). Review of #5 and #6.
+
 ## 0.6.0
 
 15 November 2026.
