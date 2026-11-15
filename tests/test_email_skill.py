@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -32,11 +33,18 @@ SCRIPT = (
 )
 
 
+#: The script's wait for the runtime in these tests; the subprocess deadline is far above it.
+CLIENT_TIMEOUT = 1.0
+SUBPROCESS_DEADLINE = 60
+
+
 class Mailer:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, dict]] = []
         self.refusal: tuple[int, str] | None = None
-        #: A raw answer (status, body bytes), or "drop" to close after the POST arrived.
+        #: A raw answer (status, body bytes); "drop" closes after the POST arrived,
+        #: "slow" sends the headers and holds the body past the client's timeout,
+        #: "short" announces more body than it sends, then closes.
         self.raw: tuple[int, bytes] | str | None = None
 
 
@@ -51,6 +59,22 @@ def mailer():
             )
             state.requests.append((self.command, self.path, body))
             if state.raw == "drop":
+                self.close_connection = True
+                self.connection.shutdown(2)
+                return
+            if state.raw in ("slow", "short"):
+                data = b'{"sent": true, "to": "me"}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header(
+                    "Content-Length", str(len(data) * (4 if state.raw == "short" else 1))
+                )
+                self.end_headers()
+                self.wfile.flush()
+                if state.raw == "slow":
+                    time.sleep(CLIENT_TIMEOUT * 3)
+                self.wfile.write(data)
+                self.wfile.flush()
                 self.close_connection = True
                 self.connection.shutdown(2)
                 return
@@ -94,8 +118,8 @@ def run(*args: str) -> subprocess.CompletedProcess:
         capture_output=True,
         check=False,
         text=True,
-        env=dict(os.environ),
-        timeout=60,
+        env={**os.environ, "DATALAYER_EMAIL_TIMEOUT_SECONDS": str(CLIENT_TIMEOUT)},
+        timeout=SUBPROCESS_DEADLINE,
     )
 
 
@@ -160,6 +184,10 @@ NOT_AGAIN = "Do not send it again"
         ((500, b""), "answered 500 without saying why"),
         # The runtime took the POST and closed the connection.
         ("drop", "connection to the agent runtime ended"),
+        # The answer's headers came, its body not within the client's timeout.
+        ("slow", "ended before its answer (TimeoutError)"),
+        # The body is shorter than its Content-Length says.
+        ("short", "ended before its answer (IncompleteRead)"),
         # A success whose body cannot be read.
         ((200, b"{not json"), "is not JSON"),
         ((200, b"null"), "does not say whether it was sent"),
