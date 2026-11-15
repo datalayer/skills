@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.5.0
+
+15 November 2026.
+
+- **Travel skills, for the Voyager.** `travel-planning` (what to ask before searching — dates, places, travellers, preferences, budget — then three trip options, each with its transport, stay, daily schedule and travel times, a Google Maps link, a budget with its total and per person, and the booking links), `fare-and-stay-comparison` (flights by route, times, fare, baggage, fare with bags and risks; stays by place, price per night and in total, rating, amenities and cancellation; one recommendation) and `dining` (restaurants, sights and stops along a route placed in the day, with their Maps links). Instructions alone, no scripts, public. Each says never to book or pay, to hand over the booking links, that a price is a quote that can change, and to quote only what the tools returned.
+
 ## 0.4.0
 
 13 November 2026.

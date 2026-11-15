@@ -77,6 +77,10 @@ CATALOGUE = {
             "concat_videos",
         ],
     ),
+    # The Voyager's (15 November 2026): instructions alone, no scripts.
+    "travel-planning": ("travel_planning", []),
+    "fare-and-stay-comparison": ("fare_and_stay_comparison", []),
+    "dining": ("dining", []),
 }
 
 #: The skills whose SKILL.md names its scripts as `script_name: <script>`.
@@ -85,7 +89,17 @@ SCRIPT_NAMED = ("accounting", "image", "video")
 #: The skills whose SKILL.md says they are public (`metadata.visibility: public`) and that need no
 #: secret: what a company may publish to people's personal agents. `github` and `events` need a
 #: token: never public.
-PUBLIC = {"accounting", "crawl", "image", "pdf", "text-summarizer", "video"}
+PUBLIC = {
+    "accounting",
+    "crawl",
+    "image",
+    "pdf",
+    "text-summarizer",
+    "video",
+    "travel-planning",
+    "fare-and-stay-comparison",
+    "dining",
+}
 
 
 @pytest.mark.parametrize("name", sorted(CATALOGUE))
