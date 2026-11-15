@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.6.0
+
+15 November 2026.
+
+- **Email, through Datalayer's mailer.** `datalayer-email`'s `send_email --subject … --text …` sends the person whose agent this is one email (the user: "for email, you can create a skill in the datalayer-skill repo and use it"). It asks the agent runtime on the pod's loopback (`POST /api/v1/configure/mail`, agent-runtimes 1.6.65), which sends it with the runtime's own short-lived token through Datalayer's IAM (`/social/mail`, IAM 1.1.124): to the person alone, at their account's address, never an address the agent names, at most ten a day for one person's agents. No mail credential is in the sandbox or the runtime. A refusal is said in its sentence, with exit code 1. Standard library only.
+
 ## 0.5.0
 
 15 November 2026.
