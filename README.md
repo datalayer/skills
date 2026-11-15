@@ -51,6 +51,7 @@ loads them from the entry points, with no skill spec of their own.
 | `datalayer-memory-search` | `search` | The memories closest to a query |
 | `datalayer-memory-list` | `list_memories` | Every memory, newest first, with its id |
 | `datalayer-memory-delete` | `delete`, `delete_all` | Forget one memory by id, or everything once the person confirmed how many |
+| `datalayer-email` | `send_email` | One email to the person whose agent this is, through Datalayer's mailer: never another address, a few a day, no mail credential |
 | `accounting` | `reconcile`, `variance`, `aging`, `close_summary` | Two ledgers reconciled, two periods compared, open invoices aged, a trial balance closed, over CSV exports |
 | `crawl` | `fetch_page`, `fetch_js_page`, `extract_links`, `extract_tables`, `crawl_site`, `check_robots` | Pages fetched (rendered when they need JavaScript), their links and tables, a site walked within its robots.txt |
 | `events` | `event` | Events of an agent created, read, listed and updated |
