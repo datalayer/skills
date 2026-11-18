@@ -532,6 +532,24 @@ def open_folder_inside(workspace: str, folder: str) -> int:
     return held
 
 
+REPLACED = (
+    "the image was replaced or removed by another writer before it could be checked: "
+    "try again, or give another --output."
+)
+
+
+def same_file(one, other) -> bool:
+    return one is not None and (one.st_dev, one.st_ino) == (other.st_dev, other.st_ino)
+
+
+def entry_at(name: str, folder_fd: int):
+    """What the folder holds under ``name`` now, never following a link; None when nothing."""
+    try:
+        return os.stat(name, dir_fd=folder_fd, follow_symlinks=False)
+    except OSError:
+        return None
+
+
 def still_at(path: str, held: os.stat_result, workspace: str) -> bool:
     """Whether what is held (by descriptor) is what ``path`` names now, under the workspace."""
     try:
@@ -573,6 +591,12 @@ def write_inside_workspace(path: str, body: bytes) -> str:
         try:
             with os.fdopen(file_fd, "wb") as handle:
                 handle.write(body)
+                handle.flush()
+                # What this call wrote, by its own descriptor: the only file it calls its own.
+                mine = os.fstat(handle.fileno())
+            # The image-stock writers of a folder replace, check and clean up one at a time:
+            # the lock is the open folder's, held until it is closed.
+            fcntl.flock(folder_fd, fcntl.LOCK_EX)
             os.replace(part, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
         except OSError as error:
             # Only the file this call made is removed.
@@ -584,15 +608,19 @@ def write_inside_workspace(path: str, body: bytes) -> str:
                 f"the image could not be written ({type(error).__name__})."
             ) from None
         target = os.path.join(folder, name)
-        if not still_at(target, os.stat(name, dir_fd=folder_fd, follow_symlinks=False), workspace):
-            # Written where the workspace no longer reaches: removed, and said.
+        entry = entry_at(name, folder_fd)
+        if not same_file(entry, mine):
+            # Replaced or removed by another writer since the rename: not this call's bytes.
+            raise StockRefused(REPLACED)
+        if not still_at(target, mine, workspace):
+            # This call's file, where the workspace no longer reaches: removed, and said.
             try:
                 os.unlink(name, dir_fd=folder_fd)
             except OSError:
                 pass
             raise StockRefused(OUTSIDE)
     finally:
-        os.close(folder_fd)
+        os.close(folder_fd)  # Releases the folder's lock.
     return target
 
 
