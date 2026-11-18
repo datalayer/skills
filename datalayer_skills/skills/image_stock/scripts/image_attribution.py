@@ -175,14 +175,21 @@ def write_state(name: str, state: dict) -> None:
         ) from None
 
 
-#: A search of every provider asks them at once: one thread at a time in a state file.
-COUNTING = threading.RLock()
+#: A thread lock per state file, so a slow one (Pixabay's cache, while it asks Pixabay)
+#: never holds up another provider's count; the guard is held only to look a lock up.
+LOCKS_GUARD = threading.Lock()
+LOCKS: dict = {}
+
+
+def thread_lock(name: str):
+    with LOCKS_GUARD:
+        return LOCKS.setdefault(name, threading.RLock())
 
 
 @contextlib.contextmanager
 def state_locked(name: str):
     """One read, check and write of a state file at a time, across threads and processes."""
-    with COUNTING:
+    with thread_lock(name):
         try:
             lock = os.open(state_file(f"{name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
         except OSError as error:

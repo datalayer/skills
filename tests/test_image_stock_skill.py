@@ -1204,6 +1204,69 @@ def test_whoami_takes_run_url_as_run_skill_script_sends_it(monkeypatch) -> None:
     assert args.run_url == "https://example.datalayer.run"
 
 
+# ---- Copilot's third review (0.7.2) ----------------------------------------------------------
+
+
+def test_a_folder_moved_out_while_open_keeps_nothing_outside(workspace, tmp_path) -> None:
+    module = load("download_image")
+    (workspace / "moved").mkdir()
+    away = tmp_path / "away"
+    real_replace = module.os.replace
+
+    def move_then_replace(*args, **kwargs):
+        os.rename(workspace / "moved", away)  # The open folder leaves the workspace.
+        return real_replace(*args, **kwargs)
+
+    module.os.replace = move_then_replace
+    try:
+        with pytest.raises(module.StockRefused) as refused:
+            module.write_inside_workspace(str(workspace / "moved" / "x.jpg"), b"1")
+    finally:
+        module.os.replace = real_replace
+    assert "under the working directory" in str(refused.value)
+    assert sorted(p.name for p in away.iterdir()) == []
+    assert not (workspace / "moved").exists()
+
+
+def test_a_folder_moved_before_the_write_is_refused(workspace, tmp_path) -> None:
+    module = load("download_image")
+    (workspace / "early").mkdir()
+    real_open = module.open_folder_inside
+
+    def open_then_move(*args):
+        fd = real_open(*args)
+        os.rename(workspace / "early", tmp_path / "gone")
+        return fd
+
+    module.open_folder_inside = open_then_move
+    with pytest.raises(module.StockRefused):
+        module.write_inside_workspace(str(workspace / "early" / "y.jpg"), b"1")
+    assert list((tmp_path / "gone").iterdir()) == []
+
+
+def test_a_slow_pixabay_cache_holds_up_no_other_count(workspace) -> None:
+    module = load("search_images")
+    started, done = module.threading.Event(), module.threading.Event()
+
+    def slow_cache() -> None:
+        with module.state_locked("pixabay-cache.json"):
+            started.set()
+            done.wait(5)
+
+    holder = module.threading.Thread(target=slow_cache)
+    holder.start()
+    assert started.wait(5)
+    counted = module.threading.Event()
+    other = module.threading.Thread(target=lambda: (module.take_request("pexels"), counted.set()))
+    other.start()
+    # Pexels is counted while Pixabay's cache is still held.
+    assert counted.wait(2)
+    done.set()
+    holder.join(5)
+    other.join(5)
+    assert module.thread_lock("rate.json") is not module.thread_lock("pixabay-cache.json")
+
+
 def test_whoami_activates_with_the_key_its_url_given_either_way() -> None:
     text = (SCRIPTS.parents[1] / "whoami" / "SKILL.md").read_text()
     front = text.split("---")[1]

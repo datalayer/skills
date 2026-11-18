@@ -6,6 +6,13 @@
 
 # Changelog
 
+## 0.7.3
+
+18 November 2026.
+
+- **Stock images, a folder moved while open.** Before the write, the open folder must still be the one at its path; after it, the file written must be the one at the path returned, else it is removed through the open folder and the download refused, so nothing is left outside the workspace and no path is returned where no file is.
+- **A lock per state file.** Each state file has a thread lock of its own: a slow Pixabay request, which holds its cache's lock, no longer holds up another provider's count in a search of every provider.
+
 ## 0.7.2
 
 18 November 2026.

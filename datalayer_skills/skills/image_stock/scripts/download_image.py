@@ -182,14 +182,21 @@ def write_state(name: str, state: dict) -> None:
         ) from None
 
 
-#: A search of every provider asks them at once: one thread at a time in a state file.
-COUNTING = threading.RLock()
+#: A thread lock per state file, so a slow one (Pixabay's cache, while it asks Pixabay)
+#: never holds up another provider's count; the guard is held only to look a lock up.
+LOCKS_GUARD = threading.Lock()
+LOCKS: dict = {}
+
+
+def thread_lock(name: str):
+    with LOCKS_GUARD:
+        return LOCKS.setdefault(name, threading.RLock())
 
 
 @contextlib.contextmanager
 def state_locked(name: str):
     """One read, check and write of a state file at a time, across threads and processes."""
-    with COUNTING:
+    with thread_lock(name):
         try:
             lock = os.open(state_file(f"{name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
         except OSError as error:
@@ -525,12 +532,27 @@ def open_folder_inside(workspace: str, folder: str) -> int:
     return held
 
 
+def still_at(path: str, held: os.stat_result, workspace: str) -> bool:
+    """Whether what is held (by descriptor) is what ``path`` names now, under the workspace."""
+    try:
+        seen = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return False
+    return (seen.st_dev, seen.st_ino) == (held.st_dev, held.st_ino) and under(
+        workspace, os.path.realpath(path)
+    )
+
+
 def write_inside_workspace(path: str, body: bytes) -> str:
     """Write ``body`` at ``path``, its final name, never outside the workspace.
 
     The folder is reached through descriptors from the workspace, never following a link; the
     file is written in it under a name of this call's own and renamed over ``path``: a link
-    there is replaced, not followed.
+    there is replaced, not followed. A folder moved out of the workspace while it is open is
+    caught on both sides of the write: before it, the open folder must still be the one at its
+    path; after it, the file written must be the one at ``path``, else it is removed through
+    the open folder and the download refused. (Python offers no openat2 RESOLVE_BENEATH to
+    close the last window, between the check and the return, entirely.)
     """
     workspace = os.path.realpath(os.getcwd())
     folder, name = os.path.split(os.path.normpath(path))
@@ -538,6 +560,8 @@ def write_inside_workspace(path: str, body: bytes) -> str:
         raise StockRefused(OUTSIDE)
     folder_fd = open_folder_inside(workspace, folder)
     try:
+        if not still_at(folder, os.fstat(folder_fd), workspace):
+            raise StockRefused(OUTSIDE)
         part = f".{name}.{os.getpid()}.{secrets.token_hex(8)}.part"
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
         try:
@@ -559,9 +583,17 @@ def write_inside_workspace(path: str, body: bytes) -> str:
             raise StockRefused(
                 f"the image could not be written ({type(error).__name__})."
             ) from None
+        target = os.path.join(folder, name)
+        if not still_at(target, os.stat(name, dir_fd=folder_fd, follow_symlinks=False), workspace):
+            # Written where the workspace no longer reaches: removed, and said.
+            try:
+                os.unlink(name, dir_fd=folder_fd)
+            except OSError:
+                pass
+            raise StockRefused(OUTSIDE)
     finally:
         os.close(folder_fd)
-    return os.path.join(folder, name)
+    return target
 
 
 def fetch(provider: str, url: str, path: str, hosts: tuple) -> dict:
