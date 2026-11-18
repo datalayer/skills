@@ -25,6 +25,7 @@ import http.client
 import ipaddress
 import json
 import os
+import secrets
 import socket
 import ssl
 import sys
@@ -498,35 +499,59 @@ def inside_workspace(output: str, provider: str, image_id: str) -> str:
     return path
 
 
+def open_folder_inside(workspace: str, folder: str) -> int:
+    """The folder, opened from the workspace one name at a time, each made when missing and
+    none a link: the descriptor returned is under the workspace, whatever is swapped meanwhile.
+    """
+    relative = os.path.relpath(folder, workspace)
+    names = [] if relative == "." else relative.split(os.sep)
+    if any(name in ("", ".", "..") for name in names):
+        raise StockRefused(OUTSIDE)
+    directory = os.O_RDONLY | os.O_DIRECTORY
+    held = os.open(workspace, directory)
+    try:
+        for name in names:
+            try:
+                os.mkdir(name, 0o755, dir_fd=held)
+            except FileExistsError:
+                pass
+            # A link here is refused, not followed.
+            inner = os.open(name, directory | os.O_NOFOLLOW, dir_fd=held)
+            os.close(held)
+            held = inner
+    except OSError:
+        os.close(held)
+        raise StockRefused(OUTSIDE) from None
+    return held
+
+
 def write_inside_workspace(path: str, body: bytes) -> str:
     """Write ``body`` at ``path``, its final name, never outside the workspace.
 
-    The folder is opened and where it truly is checked through the open folder itself, then
-    the file is written beside it under a fresh name, never following a link, and renamed
-    over ``path``: a link there is replaced, not followed.
+    The folder is reached through descriptors from the workspace, never following a link; the
+    file is written in it under a name of this call's own and renamed over ``path``: a link
+    there is replaced, not followed.
     """
     workspace = os.path.realpath(os.getcwd())
     folder, name = os.path.split(os.path.normpath(path))
-    if not name or name in (".", "..") or not under(workspace, os.path.realpath(folder)):
+    if not name or name in (".", "..") or not under(workspace, folder):
         raise StockRefused(OUTSIDE)
+    folder_fd = open_folder_inside(workspace, folder)
     try:
-        os.makedirs(folder, exist_ok=True)
-        folder_fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
-    except OSError as error:
-        raise StockRefused(f"the folder could not be made ({type(error).__name__}).") from None
-    try:
-        held = f"/proc/self/fd/{folder_fd}"
-        where = os.path.realpath(held) if os.path.exists(held) else os.path.realpath(folder)
-        if not under(workspace, where):
-            raise StockRefused(OUTSIDE)
-        part = f".{name}.{os.getpid()}.part"
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        part = f".{name}.{os.getpid()}.{secrets.token_hex(8)}.part"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
         try:
             file_fd = os.open(part, flags, 0o644, dir_fd=folder_fd)
+        except OSError as error:
+            raise StockRefused(
+                f"the image could not be written ({type(error).__name__})."
+            ) from None
+        try:
             with os.fdopen(file_fd, "wb") as handle:
                 handle.write(body)
             os.replace(part, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
         except OSError as error:
+            # Only the file this call made is removed.
             try:
                 os.unlink(part, dir_fd=folder_fd)
             except OSError:

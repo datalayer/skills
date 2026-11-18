@@ -2,4 +2,4 @@
 #
 # BSD 3-Clause License
 
-__version__ = "0.7.1"
+__version__ = "0.7.2"

@@ -1101,6 +1101,109 @@ def test_every_pixabay_answer_of_the_day_is_kept(workspace, web, monkeypatch) ->
     assert len(kept) == 55
 
 
+# ---- Copilot's second review (0.7.1) ---------------------------------------------------------
+
+
+def test_the_folder_is_reached_by_descriptors_without_proc(
+    workspace, web, monkeypatch, tmp_path
+) -> None:
+    keys(monkeypatch, "pexels")
+    web.by_host["images.pexels.com"] = JPEG
+    web.headers["images.pexels.com"] = {"Content-Type": "image/jpeg"}
+    argv = ("--provider", "pexels", "--id", "22", "--url", "https://images.pexels.com/a.jpg")
+    module = downloader(web, monkeypatch, *argv, "--output", "deep/er/x.jpg")
+    # No /proc to ask (macOS): nothing reads it any more.
+    real_exists = module.os.path.exists
+    monkeypatch.setattr(
+        module.os.path, "exists", lambda p: False if str(p).startswith("/proc") else real_exists(p)
+    )
+    assert module.main()["path"] == os.path.join("deep", "er", "x.jpg")
+    assert (workspace / "deep" / "er" / "x.jpg").read_bytes() == JPEG
+    # A folder swapped for a link out of the workspace after the path was checked: the walk
+    # by descriptors meets the link and refuses it.
+    real_mkdir = module.os.mkdir
+
+    def swap(name, mode=0o777, *, dir_fd=None):
+        real_mkdir(name, mode, dir_fd=dir_fd)
+        if name == "swapped":
+            os.rmdir(workspace / "swapped")
+            (workspace / "swapped").symlink_to(tmp_path)
+
+    monkeypatch.setattr(module.os, "mkdir", swap)
+    module = downloader(web, monkeypatch, *argv, "--output", "swapped/y.jpg")
+    monkeypatch.setattr(module.os, "mkdir", swap)
+    with pytest.raises(module.StockRefused) as refused:
+        module.main()
+    assert "under the working directory" in str(refused.value)
+    assert not (tmp_path / "y.jpg").exists()
+
+
+def test_a_writer_removes_only_its_own_temporary_file(workspace) -> None:
+    module = load("download_image")
+    names = [module.write_inside_workspace(str(workspace / "same.jpg"), b"1") for _ in range(2)]
+    assert names[0] == names[1]
+    assert sorted(p.name for p in workspace.iterdir()) == ["same.jpg"]
+    # A temporary name of another writer is never this call's: each call draws its own.
+    taken = {module.secrets.token_hex(8) for _ in range(50)}
+    assert len(taken) == 50
+    (workspace / ".other.part").write_bytes(b"theirs")
+    monkey_fail = module.os.replace
+
+    def failing(*args, **kwargs):
+        raise OSError("disk full")
+
+    module.os.replace = failing
+    try:
+        with pytest.raises(module.StockRefused):
+            module.write_inside_workspace(str(workspace / "same.jpg"), b"2")
+    finally:
+        module.os.replace = monkey_fail
+    assert (workspace / ".other.part").read_bytes() == b"theirs"
+    assert sorted(p.name for p in workspace.iterdir()) == [".other.part", "same.jpg"]
+
+
+def test_one_pixabay_page_is_asked_once_by_concurrent_searches(workspace, web, monkeypatch) -> None:
+    keys(monkeypatch, "pixabay")
+    code = (
+        "import importlib.util, json, sys, time, urllib.parse\n"
+        f"spec = importlib.util.spec_from_file_location('s', {str(SCRIPTS / 'search_images.py')!r})\n"
+        "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+        "class A:\n"
+        "    headers = {}\n"
+        "    def __enter__(self): return self\n"
+        "    def __exit__(self, *a): return False\n"
+        "    def read(self, n=-1): return b'{\"hits\": []}'\n"
+        "def answer(request, timeout, handlers=()):\n"
+        "    time.sleep(0.5)\n"
+        "    open(sys.argv[1], 'a').write('asked\\n')\n"
+        "    return A()\n"
+        "m.open_url = answer\n"
+        "m.search_pixabay('secret-pixabay-key', 'lake', 5, 1, '')\n"
+    )
+    log = workspace / "asked.log"
+    env = {**os.environ}
+    runs = [
+        subprocess.Popen([sys.executable, "-c", code, str(log)], env=env, stderr=subprocess.PIPE)
+        for _ in range(3)
+    ]
+    for run in runs:
+        assert run.wait(60) == 0, run.stderr.read().decode()
+    assert log.read_text().splitlines() == ["asked"]
+
+
+def test_whoami_takes_run_url_as_run_skill_script_sends_it(monkeypatch) -> None:
+    monkeypatch.delenv("DATALAYER_RUN_URL", raising=False)
+    monkeypatch.delenv("DATALAYER_API_KEY", raising=False)
+    path = SCRIPTS.parents[1] / "whoami" / "scripts" / "whoami.py"
+    spec = importlib.util.spec_from_file_location("whoami_script", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    args = module.arguments(["--run_url", "https://example.datalayer.run", "--api_key", "k"])
+    assert (args.run_url, args.api_key) == ("https://example.datalayer.run", "k")
+    args = module.arguments(["--run-url", "https://example.datalayer.run"])
+    assert args.run_url == "https://example.datalayer.run"
+
+
 def test_whoami_activates_with_the_key_its_url_given_either_way() -> None:
     text = (SCRIPTS.parents[1] / "whoami" / "SKILL.md").read_text()
     front = text.split("---")[1]

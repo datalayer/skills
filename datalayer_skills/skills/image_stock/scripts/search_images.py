@@ -511,19 +511,19 @@ def search_pixabay(key: str, query: str, per_page: int, page: int, orientation: 
         params["orientation"] = "horizontal" if orientation == "landscape" else "vertical"
     asked = urllib.parse.urlencode(params)
     # Pixabay asks that an answer be kept for 24 hours: the same search is answered from here.
+    # Looked up, asked on a miss and kept under one lock: two searches of the same page
+    # ask Pixabay once, and the answer kept keeps its first day.
     with state_locked("pixabay-cache.json"):
-        kept = pixabay_fresh(read_state("pixabay-cache.json"), time.time()).get(asked)
-    if kept:
-        answer = kept.get("answer") or {}
-    else:
-        answer = api_get(
-            "pixabay",
-            "https://pixabay.com/api/?" + urllib.parse.urlencode({"key": key}) + "&" + asked,
-            {},
-        )
-        # Read again under the lock: what another search kept meanwhile is kept too.
-        with state_locked("pixabay-cache.json"):
-            fresh = pixabay_fresh(read_state("pixabay-cache.json"), time.time())
+        fresh = pixabay_fresh(read_state("pixabay-cache.json"), time.time())
+        kept = fresh.get(asked)
+        if kept:
+            answer = kept.get("answer") or {}
+        else:
+            answer = api_get(
+                "pixabay",
+                "https://pixabay.com/api/?" + urllib.parse.urlencode({"key": key}) + "&" + asked,
+                {},
+            )
             fresh[asked] = {"at": time.time(), "answer": answer}
             write_state("pixabay-cache.json", fresh)
     found = []

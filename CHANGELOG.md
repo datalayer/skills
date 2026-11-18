@@ -6,6 +6,15 @@
 
 # Changelog
 
+## 0.7.2
+
+18 November 2026.
+
+- **Stock images, the folder reached by descriptors.** A download's folder is opened from the workspace one name at a time, each made when missing and none a link, so where the file lands no longer depends on `/proc` (macOS too) and a folder swapped for a link meanwhile is refused. Every symlinked folder is refused, even one pointing inside the workspace.
+- **A temporary file of its own.** Each write draws a name of its own and removes only the file it made.
+- **Pixabay asked once.** The lookup, the request on a miss and the answer kept run under one lock: two searches of the same page ask Pixabay once, and the answer kept keeps its first day.
+- **`datalayer-whoami`** takes `--run_url` and `--api_key`, as `run_skill_script` sends them.
+
 ## 0.7.1
 
 18 November 2026.
