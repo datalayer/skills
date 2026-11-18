@@ -550,38 +550,29 @@ def entry_at(name: str, folder_fd: int):
         return None
 
 
-def remove_own(name: str, folder_fd: int, mine: os.stat_result) -> None:
-    """Remove ``name`` only if it is this call's file, whoever else writes in the folder.
-
-    The entry is first moved to a random name of this call's own, and checked there: removed
-    when it is this call's file; when it is another writer's, linked back under ``name``
-    without overwriting anything (left under the private name only if ``name`` was taken
-    again meanwhile, never deleted).
-    """
-    private = f".{name}.{secrets.token_hex(8)}.gone"
+def empty_own(file_fd: int, size: int, name: str) -> str:
+    """Destroy this call's bytes through its own descriptor; the refusal that says what is left."""
+    left = (
+        f"The folder was moved out of the working directory while the image was written: an "
+        f"empty file named {name} may remain in it."
+    )
     try:
-        os.rename(name, private, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
-    except OSError:
-        return
-    if same_file(entry_at(private, folder_fd), mine):
-        try:
-            os.unlink(private, dir_fd=folder_fd)
-        except OSError:
-            pass
-        return
-    try:
-        os.link(private, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd, follow_symlinks=False)
-    except OSError:
-        if entry_at(name, folder_fd) is None:
-            try:
-                os.rename(private, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
-            except OSError:
-                pass
-        return
-    try:
-        os.unlink(private, dir_fd=folder_fd)
+        os.ftruncate(file_fd, 0)
+        return left
     except OSError:
         pass
+    try:
+        zeros = memoryview(bytes(min(size, 1 << 20)))
+        written = 0
+        while written < size:
+            written += os.pwrite(file_fd, zeros[: size - written], written)
+        return left.replace("an empty file", "a file of zeros")
+    except OSError as error:
+        return (
+            f"The folder was moved out of the working directory while the image was written, "
+            f"and its bytes could not be removed ({type(error).__name__}): a file named {name} "
+            "with the image may remain in that folder."
+        )
 
 
 def still_at(path: str, held: os.stat_result, workspace: str) -> bool:
@@ -651,11 +642,10 @@ def write_inside_workspace(path: str, body: bytes) -> str:
                 raise StockRefused(REPLACED)
             if not still_at(target, mine, workspace):
                 # Relocated: this call's file, where the workspace no longer reaches. Its bytes
-                # are emptied through its own descriptor, then its name is removed only once
-                # proven to be it.
-                os.ftruncate(file_fd, 0)
-                remove_own(name, folder_fd, mine)
-                raise StockRefused(OUTSIDE)
+                # are destroyed through its own descriptor, the one way that touches nothing
+                # but this call's file; no name is removed, since another writer may have put
+                # its own file under it meanwhile.
+                raise StockRefused(empty_own(file_fd, len(body), name))
         finally:
             os.close(file_fd)
     finally:

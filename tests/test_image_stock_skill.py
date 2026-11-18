@@ -1223,8 +1223,9 @@ def test_a_folder_moved_out_while_open_keeps_nothing_outside(workspace, tmp_path
             module.write_inside_workspace(str(workspace / "moved" / "x.jpg"), b"1")
     finally:
         module.os.replace = real_replace
-    assert "under the working directory" in str(refused.value)
-    assert sorted(p.name for p in away.iterdir()) == []
+    assert "moved out of the working directory" in str(refused.value)
+    # No name is removed; the image's bytes are gone, through its own descriptor.
+    assert [(p.name, p.stat().st_size) for p in away.iterdir()] == [("x.jpg", 0)]
     assert not (workspace / "moved").exists()
 
 
@@ -1407,6 +1408,43 @@ def test_the_written_file_stays_open_until_it_is_checked(workspace, monkeypatch)
     # The file's descriptor and the folder's are closed only after the check.
     assert events == ["check", "close", "close"]
     assert (workspace / "open.jpg").read_bytes() == b"1"
+
+
+# ---- Copilot's sixth review (0.7.5) ----------------------------------------------------------
+
+
+def test_no_name_is_removed_when_the_folder_moved(workspace, tmp_path, monkeypatch) -> None:
+    module = load("download_image")
+    removed = []
+    monkeypatch.setattr(module.os, "unlink", lambda *a, **k: removed.append(a))
+    monkeypatch.setattr(module.os, "rename", lambda *a, **k: removed.append(a))
+    (workspace / "m").mkdir()
+    monkeypatch.setattr(module, "still_at", lambda path, held, where: not path.endswith("z.jpg"))
+    with pytest.raises(module.StockRefused) as refused:
+        module.write_inside_workspace(str(workspace / "m" / "z.jpg"), b"mine")
+    assert removed == []
+    assert "an empty file named z.jpg may remain" in str(refused.value)
+    assert (workspace / "m" / "z.jpg").stat().st_size == 0
+
+
+def test_a_truncation_that_fails_is_said_and_zeros_take_its_place(workspace, monkeypatch) -> None:
+    module = load("download_image")
+    monkeypatch.setattr(
+        module, "still_at", lambda path, held, where: not path.endswith(("t.jpg", "u.jpg"))
+    )
+
+    def cannot(*args):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(module.os, "ftruncate", cannot)
+    with pytest.raises(module.StockRefused) as refused:
+        module.write_inside_workspace(str(workspace / "t.jpg"), b"mine")
+    assert "a file of zeros named t.jpg may remain" in str(refused.value)
+    assert (workspace / "t.jpg").read_bytes() == b"\0\0\0\0"
+    monkeypatch.setattr(module.os, "pwrite", cannot)
+    with pytest.raises(module.StockRefused) as refused:
+        module.write_inside_workspace(str(workspace / "u.jpg"), b"mine")
+    assert "its bytes could not be removed (OSError)" in str(refused.value)
 
 
 def test_whoami_activates_with_the_key_its_url_given_either_way() -> None:
