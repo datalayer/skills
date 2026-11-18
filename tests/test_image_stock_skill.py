@@ -17,6 +17,7 @@ import importlib.util
 import io
 import json
 import os
+import ssl
 import subprocess
 import sys
 import time
@@ -926,7 +927,10 @@ def test_a_download_connects_to_the_address_it_checked(workspace, web, monkeypat
     monkeypatch.setattr(module.socket, "getaddrinfo", lambda *a, **k: next(answers))
     opened = []
 
-    class Wrapped:
+    class Wrapped(ssl.SSLContext):
+        def __new__(cls):
+            return super().__new__(cls, ssl.PROTOCOL_TLS_CLIENT)
+
         def wrap_socket(self, sock, server_hostname):
             opened.append(("tls", server_hostname))
             return sock

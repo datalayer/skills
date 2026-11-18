@@ -185,18 +185,17 @@ def state_locked(name: str):
     """One read, check and write of a state file at a time, across threads and processes."""
     with COUNTING:
         try:
-            handle = open(state_file(f"{name}.lock"), "a+", encoding="utf-8")
+            lock = os.open(state_file(f"{name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
         except OSError as error:
             raise StockRefused(
                 f"the image-stock state could not be locked ({type(error).__name__}): set "
                 "IMAGE_STOCK_STATE_DIR to a folder that can be written."
             ) from None
-        with handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(lock)  # Closing it releases the lock.
 
 
 def take_request(provider: str) -> None:
