@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.7.6
+
+18 November 2026.
+
+- **Stock images, nothing removed by name.** When the folder is moved out of the working directory while the image is written, the image's bytes are destroyed through its own descriptor (emptied, or overwritten with zeros when it cannot be emptied), and no name is removed or renamed, since another writer may have put its own file under it. The refusal says what may remain in the moved folder, the case where the bytes could not be removed included; it is always a refusal, never a traceback.
+
 ## 0.7.5
 
 18 November 2026.
