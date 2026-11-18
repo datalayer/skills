@@ -1267,6 +1267,85 @@ def test_a_slow_pixabay_cache_holds_up_no_other_count(workspace) -> None:
     assert module.thread_lock("rate.json") is not module.thread_lock("pixabay-cache.json")
 
 
+# ---- Copilot's fourth review (0.7.3) ---------------------------------------------------------
+
+
+def after_the_rename(module, then):
+    real_replace = module.os.replace
+
+    def replace(*args, **kwargs):
+        real_replace(*args, **kwargs)
+        then()
+
+    module.os.replace = replace
+    return real_replace
+
+
+def test_bytes_another_writer_put_there_are_not_reported_as_ours(workspace) -> None:
+    module = load("download_image")
+    (workspace / "theirs.part").write_bytes(b"theirs")
+    real = after_the_rename(
+        module, lambda: os.rename(workspace / "theirs.part", workspace / "same.jpg")
+    )
+    try:
+        with pytest.raises(module.StockRefused) as refused:
+            module.write_inside_workspace(str(workspace / "same.jpg"), b"mine")
+    finally:
+        module.os.replace = real
+    assert "replaced or removed by another writer" in str(refused.value)
+    # Their file is left as they wrote it.
+    assert (workspace / "same.jpg").read_bytes() == b"theirs"
+
+
+def test_a_folder_moved_and_refilled_keeps_the_other_writers_file(workspace, tmp_path) -> None:
+    module = load("download_image")
+    (workspace / "moving").mkdir()
+    away = tmp_path / "away"
+
+    def move_and_refill() -> None:
+        os.rename(workspace / "moving", away)
+        (away / "other.part").write_bytes(b"theirs")
+        os.rename(away / "other.part", away / "x.jpg")
+
+    real = after_the_rename(module, move_and_refill)
+    try:
+        with pytest.raises(module.StockRefused):
+            module.write_inside_workspace(str(workspace / "moving" / "x.jpg"), b"mine")
+    finally:
+        module.os.replace = real
+    assert (away / "x.jpg").read_bytes() == b"theirs"
+
+
+def test_a_file_removed_after_the_rename_is_a_refusal_not_a_traceback(workspace) -> None:
+    module = load("download_image")
+    real = after_the_rename(module, lambda: os.unlink(workspace / "gone.jpg"))
+    try:
+        with pytest.raises(module.StockRefused) as refused:
+            module.write_inside_workspace(str(workspace / "gone.jpg"), b"mine")
+    finally:
+        module.os.replace = real
+    assert "replaced or removed by another writer" in str(refused.value)
+
+
+def test_the_folder_is_locked_from_the_rename_to_the_check(workspace, monkeypatch) -> None:
+    module = load("download_image")
+    calls = []
+    real_flock, real_replace = module.fcntl.flock, module.os.replace
+
+    def flock(fd, op):
+        calls.append(("flock", op))
+        return real_flock(fd, op)
+
+    def replace(*args, **kwargs):
+        calls.append(("replace", None))
+        return real_replace(*args, **kwargs)
+
+    monkeypatch.setattr(module.fcntl, "flock", flock)
+    monkeypatch.setattr(module.os, "replace", replace)
+    module.write_inside_workspace(str(workspace / "locked.jpg"), b"1")
+    assert calls == [("flock", module.fcntl.LOCK_EX), ("replace", None)]
+
+
 def test_whoami_activates_with_the_key_its_url_given_either_way() -> None:
     text = (SCRIPTS.parents[1] / "whoami" / "SKILL.md").read_text()
     front = text.split("---")[1]

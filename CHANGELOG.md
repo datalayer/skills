@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.7.4
+
+18 November 2026.
+
+- **Stock images, only its own bytes.** A download knows the file it wrote by its own descriptor, and holds the folder's lock from the rename to the check: when another writer replaced or removed the image meanwhile, it says so instead of reporting their bytes as its own, and a cleanup removes only the file it wrote. A destination gone after the rename is a refusal, never a traceback.
+
 ## 0.7.3
 
 18 November 2026.
