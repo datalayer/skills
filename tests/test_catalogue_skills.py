@@ -77,7 +77,7 @@ CATALOGUE = {
             "concat_videos",
         ],
     ),
-    # The Voyager's (15 November 2026): instructions alone, no scripts.
+    # The Traveller's (15 November 2026): instructions alone, no scripts.
     "travel-planning": ("travel_planning", []),
     "fare-and-stay-comparison": ("fare_and_stay_comparison", []),
     "dining": ("dining", []),
