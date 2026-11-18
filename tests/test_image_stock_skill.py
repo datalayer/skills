@@ -856,6 +856,7 @@ def run_script(name: str, env: dict, cwd: Path, *argv: str) -> subprocess.Comple
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
 
 
