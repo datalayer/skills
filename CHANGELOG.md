@@ -6,6 +6,17 @@
 
 # Changelog
 
+## 0.7.1
+
+18 November 2026.
+
+- **Stock images, safer downloads.** A download connects to the public address it checked, the name resolved once (no second answer of the name is asked for), redirects included and no proxy; a Freepik file and its redirects come from Freepik's own hosts alone (`freepik.com`, `magnific.com`). The file is written under the working directory for good: its final name (extension included) checked, written beside it and renamed, so a link at the path is replaced and never followed, and a folder leading out of it is refused.
+- **Unsplash told first.** An Unsplash download is reported before the image is fetched: when it cannot be, the image is not downloaded and the refusal says why (no file with a warning any more).
+- **Credits.** An author's name without a link is escaped in the HTML line too. `image_attribution` takes `author_url`, `page_url` and `license_type` as `run_skill_script` sends them, with underscores.
+- **Limits kept whole.** A request whose count cannot be saved is not sent. Every count, and the Pixabay answers kept, are read and written under a lock shared by the skill's processes. A provider's wait is kept whole: its `Retry-After` or reset on a 429, and a reset of more than an hour too.
+- **Pixabay.** Pages of 1 or 2 results follow each other with none skipped. Every answer of the day is kept, however many searches.
+- **`datalayer-whoami`** is activated with `DATALAYER_API_KEY`; `DATALAYER_RUN_URL` is optional, as the `run_url` kwarg gives it too.
+
 ## 0.7.0
 
 18 November 2026.
