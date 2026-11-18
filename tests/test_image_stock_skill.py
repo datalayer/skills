@@ -1346,6 +1346,69 @@ def test_the_folder_is_locked_from_the_rename_to_the_check(workspace, monkeypatc
     assert calls == [("flock", module.fcntl.LOCK_EX), ("replace", None)]
 
 
+# ---- Copilot's fifth review (0.7.4) ----------------------------------------------------------
+
+
+def test_a_file_unlinked_and_made_again_is_not_taken_for_ours(workspace) -> None:
+    module = load("download_image")
+
+    def unlink_and_create() -> None:
+        os.unlink(workspace / "again.jpg")
+        (workspace / "again.jpg").write_bytes(b"theirs")
+
+    real = after_the_rename(module, unlink_and_create)
+    try:
+        with pytest.raises(module.StockRefused) as refused:
+            module.write_inside_workspace(str(workspace / "again.jpg"), b"mine")
+    finally:
+        module.os.replace = real
+    assert "replaced or removed by another writer" in str(refused.value)
+    assert (workspace / "again.jpg").read_bytes() == b"theirs"
+
+
+def test_a_writer_ignoring_the_lock_keeps_its_file_through_the_cleanup(
+    workspace, monkeypatch
+) -> None:
+    module = load("download_image")
+    real_still_at = module.still_at
+
+    def replaced_then_seen_relocated(path, held, where):
+        # Between the ownership check and the cleanup, a writer that ignores the folder's
+        # lock puts its own file at the destination.
+        if path.endswith("race.jpg"):
+            (workspace / "theirs.tmp").write_bytes(b"theirs")
+            os.rename(workspace / "theirs.tmp", workspace / "race.jpg")
+            return False
+        return real_still_at(path, held, where)
+
+    monkeypatch.setattr(module, "still_at", replaced_then_seen_relocated)
+    with pytest.raises(module.StockRefused):
+        module.write_inside_workspace(str(workspace / "race.jpg"), b"mine")
+    assert (workspace / "race.jpg").read_bytes() == b"theirs"
+    assert sorted(p.name for p in workspace.iterdir()) == ["race.jpg"]
+
+
+def test_the_written_file_stays_open_until_it_is_checked(workspace, monkeypatch) -> None:
+    module = load("download_image")
+    events = []
+    real_close, real_entry = module.os.close, module.entry_at
+
+    def close(fd):
+        events.append("close")
+        return real_close(fd)
+
+    def entry(name, folder_fd):
+        events.append("check")
+        return real_entry(name, folder_fd)
+
+    monkeypatch.setattr(module.os, "close", close)
+    monkeypatch.setattr(module, "entry_at", entry)
+    module.write_inside_workspace(str(workspace / "open.jpg"), b"1")
+    # The file's descriptor and the folder's are closed only after the check.
+    assert events == ["check", "close", "close"]
+    assert (workspace / "open.jpg").read_bytes() == b"1"
+
+
 def test_whoami_activates_with_the_key_its_url_given_either_way() -> None:
     text = (SCRIPTS.parents[1] / "whoami" / "SKILL.md").read_text()
     front = text.split("---")[1]

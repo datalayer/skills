@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.7.5
+
+18 November 2026.
+
+- **Stock images, the written file held until checked.** The image's descriptor stays open until the check and any cleanup are done, so its inode cannot pass to a file made in its place. A cleanup empties the image through its own descriptor, then moves its name aside to a name of its own and removes it only there, once proven to be it; another writer's file, even one that ignored the folder's lock, is put back under its name, never deleted.
+
 ## 0.7.4
 
 18 November 2026.
