@@ -56,19 +56,28 @@ def whoami(run_url: str, api_key: str) -> dict:
     }
 
 
-if __name__ == "__main__":
+def arguments(argv=None) -> argparse.Namespace:
+    """The command line; `run_skill_script` sends its kwargs with underscores (`--run_url`)."""
     parser = argparse.ArgumentParser(description="Fetch Datalayer user profile")
     parser.add_argument(
         "--run-url",
+        "--run_url",
+        dest="run_url",
         default=os.environ.get("DATALAYER_RUN_URL", ""),
         help="Datalayer platform URL (default: $DATALAYER_RUN_URL)",
     )
     parser.add_argument(
         "--api-key",
+        "--api_key",
+        dest="api_key",
         default=os.environ.get("DATALAYER_API_KEY", ""),
         help="API key (default: $DATALAYER_API_KEY)",
     )
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    args = arguments()
 
     if not args.run_url:
         print(

@@ -128,7 +128,7 @@ run. `search_images` with `provider: all` searches exactly those.
 - Prints `{"provider", "id", "path", "bytes", "content_type", "credit", "next"}`, and `reported_to_unsplash` for Unsplash.
 - An Unsplash download is reported to Unsplash first: when it cannot be, the image is not downloaded and the refusal says why.
 - An image is fetched over https from the provider's own image hosts alone (Freepik's on `freepik.com` or `magnific.com`), redirects included, each connection made to the public address checked, up to 40 MB.
-- The file is written under the working directory alone: a link at the path is replaced, never followed, and a folder that leads out of it is refused.
+- The file is written under the working directory alone: a link at the path is replaced, never followed, and a folder that is a link is refused, even one pointing inside it: give a real folder.
 
 ## Common Failure Modes
 
