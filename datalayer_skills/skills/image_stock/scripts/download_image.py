@@ -550,6 +550,40 @@ def entry_at(name: str, folder_fd: int):
         return None
 
 
+def remove_own(name: str, folder_fd: int, mine: os.stat_result) -> None:
+    """Remove ``name`` only if it is this call's file, whoever else writes in the folder.
+
+    The entry is first moved to a random name of this call's own, and checked there: removed
+    when it is this call's file; when it is another writer's, linked back under ``name``
+    without overwriting anything (left under the private name only if ``name`` was taken
+    again meanwhile, never deleted).
+    """
+    private = f".{name}.{secrets.token_hex(8)}.gone"
+    try:
+        os.rename(name, private, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
+    except OSError:
+        return
+    if same_file(entry_at(private, folder_fd), mine):
+        try:
+            os.unlink(private, dir_fd=folder_fd)
+        except OSError:
+            pass
+        return
+    try:
+        os.link(private, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd, follow_symlinks=False)
+    except OSError:
+        if entry_at(name, folder_fd) is None:
+            try:
+                os.rename(private, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
+            except OSError:
+                pass
+        return
+    try:
+        os.unlink(private, dir_fd=folder_fd)
+    except OSError:
+        pass
+
+
 def still_at(path: str, held: os.stat_result, workspace: str) -> bool:
     """Whether what is held (by descriptor) is what ``path`` names now, under the workspace."""
     try:
@@ -588,37 +622,42 @@ def write_inside_workspace(path: str, body: bytes) -> str:
             raise StockRefused(
                 f"the image could not be written ({type(error).__name__})."
             ) from None
+        # The file's descriptor stays open until the check and any cleanup are done: its inode
+        # cannot be given to another file meanwhile.
         try:
-            with os.fdopen(file_fd, "wb") as handle:
-                handle.write(body)
-                handle.flush()
+            try:
+                view = memoryview(body)
+                while view:
+                    view = view[os.write(file_fd, view) :]
                 # What this call wrote, by its own descriptor: the only file it calls its own.
-                mine = os.fstat(handle.fileno())
-            # The image-stock writers of a folder replace, check and clean up one at a time:
-            # the lock is the open folder's, held until it is closed.
-            fcntl.flock(folder_fd, fcntl.LOCK_EX)
-            os.replace(part, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
-        except OSError as error:
-            # Only the file this call made is removed.
-            try:
-                os.unlink(part, dir_fd=folder_fd)
-            except OSError:
-                pass
-            raise StockRefused(
-                f"the image could not be written ({type(error).__name__})."
-            ) from None
-        target = os.path.join(folder, name)
-        entry = entry_at(name, folder_fd)
-        if not same_file(entry, mine):
-            # Replaced or removed by another writer since the rename: not this call's bytes.
-            raise StockRefused(REPLACED)
-        if not still_at(target, mine, workspace):
-            # This call's file, where the workspace no longer reaches: removed, and said.
-            try:
-                os.unlink(name, dir_fd=folder_fd)
-            except OSError:
-                pass
-            raise StockRefused(OUTSIDE)
+                mine = os.fstat(file_fd)
+                # The image-stock writers of a folder replace, check and clean up one at a
+                # time: the lock is the open folder's, held until it is closed.
+                fcntl.flock(folder_fd, fcntl.LOCK_EX)
+                os.replace(part, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
+            except OSError as error:
+                # Only the file this call made is removed: its name is this call's own.
+                try:
+                    os.unlink(part, dir_fd=folder_fd)
+                except OSError:
+                    pass
+                raise StockRefused(
+                    f"the image could not be written ({type(error).__name__})."
+                ) from None
+            target = os.path.join(folder, name)
+            if not same_file(entry_at(name, folder_fd), mine):
+                # Replaced or removed by another writer since the rename: not this call's
+                # bytes, and nothing of theirs is touched.
+                raise StockRefused(REPLACED)
+            if not still_at(target, mine, workspace):
+                # Relocated: this call's file, where the workspace no longer reaches. Its bytes
+                # are emptied through its own descriptor, then its name is removed only once
+                # proven to be it.
+                os.ftruncate(file_fd, 0)
+                remove_own(name, folder_fd, mine)
+                raise StockRefused(OUTSIDE)
+        finally:
+            os.close(file_fd)
     finally:
         os.close(folder_fd)  # Releases the folder's lock.
     return target
