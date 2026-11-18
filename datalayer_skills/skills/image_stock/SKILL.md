@@ -126,7 +126,9 @@ run. `search_images` with `provider: all` searches exactly those.
   - `output`: a relative path under the working directory (default `images/<provider>-<id>` with the image's extension).
   - `download_location`: Unsplash only, the result's `download_location`.
 - Prints `{"provider", "id", "path", "bytes", "content_type", "credit", "next"}`, and `reported_to_unsplash` for Unsplash.
-- An image is fetched over https from the provider's own image hosts alone, up to 40 MB.
+- An Unsplash download is reported to Unsplash first: when it cannot be, the image is not downloaded and the refusal says why.
+- An image is fetched over https from the provider's own image hosts alone (Freepik's on `freepik.com` or `magnific.com`), redirects included, each connection made to the public address checked, up to 40 MB.
+- The file is written under the working directory alone: a link at the path is replaced, never followed, and a folder that leads out of it is refused.
 
 ## Common Failure Modes
 
@@ -134,4 +136,6 @@ run. `search_images` with `provider: all` searches exactly those.
 - `Error: <Provider> rate limit reached ...: try again in N s`: wait, or use another provider. Do not retry in a loop.
 - `Error: <Provider> refused the key in <NAME> (HTTP 401)`: the person's key is wrong or revoked; tell them which variable, never its value.
 - `Error: ... is not where this provider serves its images`: pass the `full_url` exactly as `search_images` returned it.
+- `Error: the download could not be reported to Unsplash, so the image was not downloaded ...`: try again later, or use another provider.
+- `Error: the image-stock state could not be saved ...`: the counts of requests cannot be kept, so none is sent; `IMAGE_STOCK_STATE_DIR` must name a folder that can be written.
 - Exit code `2`: an unknown `kwargs` key or a missing one.

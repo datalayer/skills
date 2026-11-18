@@ -17,10 +17,13 @@ import importlib.util
 import io
 import json
 import os
+import ssl
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -716,18 +719,19 @@ def test_an_unsplash_download_is_reported_to_unsplash(workspace, web, monkeypatc
     ).main()
     assert said["path"] == os.path.join("pictures", "lake.jpg")
     assert said["reported_to_unsplash"] is True
-    image, event = web.requests
+    # Unsplash is told first, then the image is downloaded.
+    event, image = web.requests
     assert image.get_header("Authorization") is None
     assert event.full_url == "https://api.unsplash.com/photos/u1/download?ixid=abc"
     assert event.get_header("Authorization") == "Client-ID secret-unsplash-key"
 
 
-def test_an_unreported_unsplash_download_says_so(workspace, web, monkeypatch) -> None:
+def test_an_unreported_unsplash_download_is_not_downloaded(workspace, web, monkeypatch) -> None:
     keys(monkeypatch, "unsplash")
     web.by_host["images.unsplash.com"] = JPEG
     web.headers["images.unsplash.com"] = {"Content-Type": "image/jpeg"}
     web.fail["api.unsplash.com"] = 503
-    said = downloader(
+    module = downloader(
         web,
         monkeypatch,
         "--provider",
@@ -736,17 +740,22 @@ def test_an_unreported_unsplash_download_says_so(workspace, web, monkeypatch) ->
         "u 1",
         "--url",
         "https://images.unsplash.com/p",
-    ).main()
-    assert said["reported_to_unsplash"] is False and "could not be reported" in said["warning"]
-    assert web.requests[1].full_url == "https://api.unsplash.com/photos/u%201/download"
-    assert (workspace / said["path"]).is_file()
+    )
+    with pytest.raises(module.StockRefused) as refused:
+        module.main()
+    assert "could not be reported to Unsplash, so the image was not downloaded" in str(
+        refused.value
+    )
+    (event,) = web.requests
+    assert event.full_url == "https://api.unsplash.com/photos/u%201/download"
+    assert not (workspace / "images").exists()
 
 
 def test_the_key_goes_to_the_provider_alone(workspace, web, monkeypatch) -> None:
     keys(monkeypatch, "unsplash")
     web.by_host["images.unsplash.com"] = JPEG
     web.headers["images.unsplash.com"] = {"Content-Type": "image/jpeg"}
-    said = downloader(
+    module = downloader(
         web,
         monkeypatch,
         "--provider",
@@ -757,18 +766,25 @@ def test_the_key_goes_to_the_provider_alone(workspace, web, monkeypatch) -> None
         "https://images.unsplash.com/p",
         "--download-location",
         "https://elsewhere.example/photos/u1/download",
-    ).main()
-    assert said["reported_to_unsplash"] is False
-    assert web.hosts() == ["images.unsplash.com"]
+    )
+    with pytest.raises(module.StockRefused) as refused:
+        module.main()
+    assert "api.unsplash.com" in str(refused.value)
+    assert web.requests == []
 
 
 def test_a_freepik_download_is_asked_by_id(workspace, web, monkeypatch) -> None:
     keys(monkeypatch, "freepik")
     web.by_host["api.magnific.com"] = json.dumps(
-        {"data": {"filename": "lake.jpg", "url": "https://downloads.example.net/lake.jpg?exp=1"}}
+        {
+            "data": {
+                "filename": "lake.jpg",
+                "url": "https://downloadscdn5.freepik.com/lake.jpg?exp=1",
+            }
+        }
     ).encode()
-    web.by_host["downloads.example.net"] = JPEG
-    web.headers["downloads.example.net"] = {"Content-Type": "image/jpeg"}
+    web.by_host["downloadscdn5.freepik.com"] = JPEG
+    web.headers["downloadscdn5.freepik.com"] = {"Content-Type": "image/jpeg"}
     said = downloader(web, monkeypatch, "--provider", "freepik", "--id", "4444").main()
     api, file = web.requests
     assert api.full_url == "https://api.magnific.com/v1/resources/4444/download"
@@ -806,7 +822,7 @@ def test_what_a_download_refuses(workspace, web, monkeypatch, argv, says) -> Non
 
 def test_a_private_address_is_refused(workspace, web, monkeypatch) -> None:
     keys(monkeypatch, "freepik")
-    web.by_host["api.magnific.com"] = b'{"data": {"url": "https://internal.example/x.jpg"}}'
+    web.by_host["api.magnific.com"] = b'{"data": {"url": "https://img.freepik.com/x.jpg"}}'
     module = downloader(web, monkeypatch, "--provider", "freepik", "--id", "4444")
     monkeypatch.setattr(
         module.socket, "getaddrinfo", lambda host, *a, **k: [(2, 1, 6, "", ("10.0.0.7", 443))]
@@ -878,3 +894,215 @@ def test_the_scripts_run_as_command_lines(tmp_path) -> None:
         "image_attribution", {}, tmp_path, "--provider", "pixabay", "--author", "linus"
     )
     assert json.loads(line.stdout)["text"] == "Image by linus from Pixabay (https://pixabay.com)"
+
+
+# ---- Copilot's review of 0.7.0 ---------------------------------------------------------------
+
+
+def test_a_freepik_file_or_its_redirect_goes_to_freepik_alone(workspace, web, monkeypatch) -> None:
+    keys(monkeypatch, "freepik")
+    web.by_host["api.magnific.com"] = b'{"data": {"url": "https://elsewhere.example/x.jpg"}}'
+    module = downloader(web, monkeypatch, "--provider", "freepik", "--id", "4444")
+    with pytest.raises(module.StockRefused) as refused:
+        module.main()
+    assert "is not where this provider serves its images" in str(refused.value)
+    assert web.hosts() == ["api.magnific.com"]
+    handler = module.CheckedRedirect(module.IMAGE_HOSTS["freepik"])
+    handler.redirect_request(
+        urllib.request.Request("https://img.freepik.com/a"),
+        None,
+        302,
+        "Found",
+        {},
+        "https://downloadscdn5.freepik.com/b.jpg",
+    )
+    for elsewhere in ("https://elsewhere.example/a.jpg", "https://freepik.com.evil.example/a"):
+        with pytest.raises(module.StockRefused):
+            handler.redirect_request(None, None, 302, "Found", {}, elsewhere)
+
+
+def test_a_download_connects_to_the_address_it_checked(workspace, web, monkeypatch) -> None:
+    module = downloader(web, monkeypatch)
+    answers = iter([[(2, 1, 6, "", ("93.184.216.34", 443))], [(2, 1, 6, "", ("10.0.0.7", 443))]])
+    monkeypatch.setattr(module.socket, "getaddrinfo", lambda *a, **k: next(answers))
+    opened = []
+
+    class Wrapped(ssl.SSLContext):
+        def __new__(cls):
+            return super().__new__(cls, ssl.PROTOCOL_TLS_CLIENT)
+
+        def wrap_socket(self, sock, server_hostname):
+            opened.append(("tls", server_hostname))
+            return sock
+
+    def create_connection(address, *rest):
+        opened.append(("tcp", address))
+        return object()
+
+    monkeypatch.setattr(module.socket, "create_connection", create_connection)
+    connection = module.PinnedHTTPSConnection("images.pexels.com", 443, context=Wrapped())
+    connection.connect()
+    # Resolved once, connected to that address, the name kept for TLS.
+    assert opened == [("tcp", ("93.184.216.34", 443)), ("tls", "images.pexels.com")]
+    # A second resolution answering a private address is refused before any connection.
+    with pytest.raises(module.StockRefused):
+        module.PinnedHTTPSConnection("images.pexels.com", 443, context=Wrapped()).connect()
+    kinds = [type(handler).__name__ for handler in module.download_handlers(("x",))]
+    assert kinds == ["ProxyHandler", "PinnedHTTPSHandler", "CheckedRedirect"]
+
+
+def test_a_link_in_the_workspace_is_replaced_never_followed(
+    workspace, web, monkeypatch, tmp_path
+) -> None:
+    keys(monkeypatch, "pexels")
+    outside = tmp_path / "outside.jpg"
+    outside.write_bytes(b"keep")
+    (workspace / "photo.jpg").symlink_to(outside)
+    web.by_host["images.pexels.com"] = JPEG
+    web.headers["images.pexels.com"] = {"Content-Type": "image/jpeg"}
+    argv = ("--provider", "pexels", "--id", "22", "--url", "https://images.pexels.com/a.jpg")
+    said = downloader(web, monkeypatch, *argv, "--output", "photo").main()
+    assert said["path"] == "photo.jpg"
+    assert outside.read_bytes() == b"keep"
+    assert not (workspace / "photo.jpg").is_symlink()
+    assert (workspace / "photo.jpg").read_bytes() == JPEG
+    # A folder that is a link out of the workspace is refused.
+    (workspace / "out").symlink_to(tmp_path)
+    module = downloader(web, monkeypatch, *argv, "--output", "out/x.jpg")
+    with pytest.raises(module.StockRefused) as refused:
+        module.main()
+    assert "under the working directory" in str(refused.value)
+    assert not (tmp_path / "x.jpg").exists()
+
+
+def test_an_unlinked_name_is_escaped_in_html(workspace, web, monkeypatch) -> None:
+    line = attribution(web, monkeypatch, provider="pixabay", author="<img src=x onerror=alert(1)>")
+    assert "<img" not in line["html"] and "&lt;img" in line["html"]
+    assert line["markdown"].startswith("Image by <img")  # Markdown and text say it as given.
+
+
+def test_attribution_takes_the_underscore_spellings(workspace, web, monkeypatch) -> None:
+    argv = (
+        "--provider",
+        "freepik",
+        "--author",
+        "margaret",
+        "--author_url",
+        "https://www.freepik.com/author/margaret",
+        "--page_url",
+        "https://www.freepik.com/photo/1",
+        "--license_type",
+        "premium",
+    )
+    line = script("image_attribution", web, monkeypatch, *argv).main()
+    assert line["required"] is False
+    assert line["markdown"] == (
+        "Image by [margaret](https://www.freepik.com/author/margaret) "
+        "on [Freepik](https://www.freepik.com/photo/1)"
+    )
+
+
+def test_a_request_whose_count_cannot_be_kept_is_not_sent(workspace, web, monkeypatch) -> None:
+    keys(monkeypatch, "pexels")
+    module = script("search_images", web, monkeypatch, "lake", "--provider", "pexels")
+
+    def cannot(*args, **kwargs):
+        raise OSError("no space left")
+
+    monkeypatch.setattr(module.os, "replace", cannot)
+    with pytest.raises(module.StockRefused) as refused:
+        module.main()
+    assert "could not be saved" in str(refused.value)
+    assert web.requests == []
+
+
+def test_the_count_is_kept_whole_across_processes(workspace) -> None:
+    code = (
+        "import importlib.util, sys\n"
+        f"spec = importlib.util.spec_from_file_location('s', {str(SCRIPTS / 'search_images.py')!r})\n"
+        "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+        "for _ in range(25):\n"
+        "    m.take_request('freepik')\n"
+    )
+    env = {**os.environ, "FREEPIK_REQUESTS_PER_MINUTE": "600"}
+    runs = [
+        subprocess.Popen([sys.executable, "-c", code], env=env, stderr=subprocess.PIPE)
+        for _ in range(4)
+    ]
+    for run in runs:
+        assert run.wait(60) == 0, run.stderr.read().decode()
+    kept = json.loads((workspace.parent / "state" / "rate.json").read_text())
+    assert len(kept["freepik"]["calls"]) == 100
+
+
+def test_a_provider_is_left_alone_for_the_whole_wait_it_asks(workspace, web, monkeypatch) -> None:
+    keys(monkeypatch, "pexels")
+    module = script("search_images", web, monkeypatch, "lake", "--provider", "pexels")
+    assert module.wait_asked({"Retry-After": "7200"}, 60.0) == 7200.0
+    assert module.wait_asked({}, 60.0) == 60.0
+    assert 3590 < module.wait_asked({"X-Ratelimit-Reset": str(int(time.time()) + 3600)}, 1) <= 3600
+    module.block_until("pexels", 7200.0)
+    module.block_until("pexels", 60.0)  # A shorter wait leaves the longer one.
+    kept = json.loads((workspace.parent / "state" / "rate.json").read_text())
+    assert kept["pexels"]["blocked_until"] - time.time() > 7000
+
+    def refused_429(request, timeout, handlers=()):
+        raise urllib.error.HTTPError(
+            request.full_url, 429, "slow down", {"Retry-After": "5400"}, io.BytesIO(b"")
+        )
+
+    keys(monkeypatch, "pixabay")
+    other = script("search_images", web, monkeypatch, "lake", "--provider", "pixabay")
+    monkeypatch.setattr(other, "open_url", refused_429)
+    with pytest.raises(other.StockRefused):
+        other.main()
+    kept = json.loads((workspace.parent / "state" / "rate.json").read_text())
+    assert kept["pixabay"]["blocked_until"] - time.time() > 5300
+
+
+@pytest.mark.parametrize(
+    ("per_page", "page", "window"),
+    [
+        (1, 1, (3, 1, 0)),
+        (1, 2, (3, 1, 1)),
+        (1, 3, (3, 1, 2)),
+        (1, 4, (3, 2, 0)),
+        (2, 2, (6, 1, 2)),
+        (2, 4, (6, 2, 0)),
+        (5, 3, (5, 3, 0)),
+    ],
+)
+def test_small_pixabay_pages_skip_nothing(per_page, page, window) -> None:
+    assert load("search_images").pixabay_window(per_page, page) == window
+
+
+def test_pixabay_pages_of_one_follow_each_other(workspace, web, monkeypatch) -> None:
+    keys(monkeypatch, "pixabay")
+    hits = [
+        {"id": n, "user": "u", "user_id": 1, "pageURL": "", "webformatURL": "", "largeImageURL": ""}
+        for n in (1, 2, 3)
+    ]
+    web.by_host["pixabay.com"] = json.dumps({"hits": hits}).encode()
+    ids = []
+    for page in ("1", "2", "3"):
+        argv = ("lake", "--provider", "pixabay", "--per-page", "1", "--page", page)
+        ids += [r["id"] for r in script("search_images", web, monkeypatch, *argv).main()["results"]]
+    assert ids == ["1", "2", "3"]
+    assert len(web.requests) == 1  # Pixabay's one page of 3, kept for the day.
+
+
+def test_every_pixabay_answer_of_the_day_is_kept(workspace, web, monkeypatch) -> None:
+    keys(monkeypatch, "pixabay")
+    for n in range(55):
+        script("search_images", web, monkeypatch, f"lake {n}", "--provider", "pixabay").main()
+    script("search_images", web, monkeypatch, "lake 0", "--provider", "pixabay").main()
+    assert len(web.requests) == 55
+    kept = json.loads((workspace.parent / "state" / "pixabay-cache.json").read_text())
+    assert len(kept) == 55
+
+
+def test_whoami_activates_with_the_key_its_url_given_either_way() -> None:
+    text = (SCRIPTS.parents[1] / "whoami" / "SKILL.md").read_text()
+    front = text.split("---")[1]
+    assert "required:\n    - DATALAYER_API_KEY\n  optional:\n    - DATALAYER_RUN_URL" in front
+    assert "Either one is enough" in text

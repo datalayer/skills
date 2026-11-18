@@ -16,6 +16,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import email.utils
+import fcntl
 import html
 import json
 import os
@@ -159,22 +162,45 @@ def read_state(name: str) -> dict:
 
 
 def write_state(name: str, state: dict) -> None:
+    """Keep a state file, or refuse: a request whose count cannot be kept is not sent."""
     path = state_file(name)
+    temporary = f"{path}.{os.getpid()}.{threading.get_ident()}"
     try:
-        with open(f"{path}.{os.getpid()}", "w", encoding="utf-8") as handle:
+        with open(temporary, "w", encoding="utf-8") as handle:
             json.dump(state, handle)
-        os.replace(f"{path}.{os.getpid()}", path)
-    except OSError:
-        pass  # Counting is best effort where nothing can be written.
+        os.replace(temporary, path)
+    except OSError as error:
+        raise StockRefused(
+            f"the image-stock state could not be saved ({type(error).__name__}): set "
+            "IMAGE_STOCK_STATE_DIR to a folder that can be written."
+        ) from None
 
 
-#: A search of every provider asks them at once: one at a time counts.
-COUNTING = threading.Lock()
+#: A search of every provider asks them at once: one thread at a time in a state file.
+COUNTING = threading.RLock()
+
+
+@contextlib.contextmanager
+def state_locked(name: str):
+    """One read, check and write of a state file at a time, across threads and processes."""
+    with COUNTING:
+        try:
+            lock = os.open(state_file(f"{name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as error:
+            raise StockRefused(
+                f"the image-stock state could not be locked ({type(error).__name__}): set "
+                "IMAGE_STOCK_STATE_DIR to a folder that can be written."
+            ) from None
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(lock)  # Closing it releases the lock.
 
 
 def take_request(provider: str) -> None:
     """Count one request to a provider, or refuse it when its limit is reached."""
-    with COUNTING:
+    with state_locked("rate.json"):
         count_request(provider)
 
 
@@ -199,23 +225,39 @@ def count_request(provider: str) -> None:
 
 
 def block_until(provider: str, seconds: float) -> None:
-    with COUNTING:
+    """Ask a provider nothing for ``seconds``, its whole deadline; a later one kept is kept."""
+    with state_locked("rate.json"):
         state = read_state("rate.json")
         entry = state.get(provider) if isinstance(state.get(provider), dict) else {}
-        entry["blocked_until"] = time.time() + max(1.0, min(seconds, 3600.0))
+        until = time.time() + max(1.0, seconds)
+        entry["blocked_until"] = max(until, float(entry.get("blocked_until") or 0))
         state[provider] = entry
         write_state("rate.json", state)
+
+
+def wait_asked(headers, default: float) -> float:
+    """The wait a provider asks for: its Retry-After (seconds or a date), else its reset."""
+    retry = str((headers or {}).get("Retry-After") or "").strip()
+    if retry.isdigit():
+        return float(retry)
+    if retry:
+        try:
+            return email.utils.parsedate_to_datetime(retry).timestamp() - time.time()
+        except (TypeError, ValueError, IndexError):
+            pass
+    reset = str((headers or {}).get("X-Ratelimit-Reset") or "").strip()
+    if reset.isdigit():
+        seconds = float(reset)
+        # A date, in seconds since 1970, and not a delay.
+        return seconds - time.time() if seconds > 10_000_000 else seconds
+    return default
 
 
 def note_remaining(provider: str, headers) -> None:
     """Stop asking a provider that says no request is left, until it has some again."""
     if str(headers.get("X-Ratelimit-Remaining") or "").strip() != "0":
         return
-    reset = str(headers.get("X-Ratelimit-Reset") or "").strip()
-    seconds = float(reset) if reset.isdigit() else 900.0
-    if seconds > 10_000_000:  # A date, in seconds since 1970, and not a delay.
-        seconds -= time.time()
-    block_until(provider, seconds)
+    block_until(provider, wait_asked(headers, 900.0))
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -257,7 +299,7 @@ def api_get(provider: str, url: str, headers: dict) -> dict:
             body = response.read(MAX_JSON_BYTES + 1)
     except urllib.error.HTTPError as error:
         if error.code == 429:
-            block_until(provider, 60.0)
+            block_until(provider, wait_asked(error.headers, 60.0))
         raise StockRefused(refusal_of(provider, error.code)) from None
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         reason = getattr(error, "reason", None) or type(error).__name__
@@ -304,7 +346,7 @@ def credit(
 
     def linked(kind: str, text: str, url: str) -> str:
         if not url or kind == "text":
-            return text
+            return html.escape(text) if kind == "html" else text
         if kind == "markdown":
             return f"[{text}]({url})"
         return f'<a href="{html.escape(url, quote=True)}">{html.escape(text)}</a>'
@@ -433,21 +475,45 @@ def search_pexels(key: str, query: str, per_page: int, page: int, orientation: s
     return found
 
 
+PIXABAY_DAY = 86400.0
+
+
+def pixabay_window(per_page: int, page: int) -> tuple:
+    """(Pixabay's page size, its page, where ours starts in it) for our ``page`` of ``per_page``.
+
+    Pixabay takes no fewer than 3 a page: below that, its page is a multiple of ours (3 or 6),
+    so that each of our pages lies whole in one of its, and none is skipped.
+    """
+    size = per_page if per_page >= 3 else per_page * 3
+    offset = (page - 1) * per_page
+    return size, offset // size + 1, offset % size
+
+
+def pixabay_fresh(cache: dict, now: float) -> dict:
+    """Every answer kept less than a day: all of them, however many."""
+    return {
+        asked: entry
+        for asked, entry in cache.items()
+        if isinstance(entry, dict) and now - float(entry.get("at") or 0) < PIXABAY_DAY
+    }
+
+
 def search_pixabay(key: str, query: str, per_page: int, page: int, orientation: str) -> list:
+    size, their_page, start = pixabay_window(per_page, page)
     params = {
         "q": query[:100],
         "image_type": "photo",
         "safesearch": "true",
-        "page": page,
-        "per_page": max(3, per_page),  # Pixabay takes no fewer than 3.
+        "page": their_page,
+        "per_page": size,
     }
     if orientation in ("landscape", "portrait"):  # It has no square.
         params["orientation"] = "horizontal" if orientation == "landscape" else "vertical"
     asked = urllib.parse.urlencode(params)
     # Pixabay asks that an answer be kept for 24 hours: the same search is answered from here.
-    cache = read_state("pixabay-cache.json")
-    kept = cache.get(asked)
-    if isinstance(kept, dict) and time.time() - float(kept.get("at") or 0) < 86400:
+    with state_locked("pixabay-cache.json"):
+        kept = pixabay_fresh(read_state("pixabay-cache.json"), time.time()).get(asked)
+    if kept:
         answer = kept.get("answer") or {}
     else:
         answer = api_get(
@@ -455,15 +521,13 @@ def search_pixabay(key: str, query: str, per_page: int, page: int, orientation: 
             "https://pixabay.com/api/?" + urllib.parse.urlencode({"key": key}) + "&" + asked,
             {},
         )
-        fresh = {
-            asked_before: entry
-            for asked_before, entry in cache.items()
-            if isinstance(entry, dict) and time.time() - float(entry.get("at") or 0) < 86400
-        }
-        fresh[asked] = {"at": time.time(), "answer": answer}
-        write_state("pixabay-cache.json", dict(list(fresh.items())[-50:]))
+        # Read again under the lock: what another search kept meanwhile is kept too.
+        with state_locked("pixabay-cache.json"):
+            fresh = pixabay_fresh(read_state("pixabay-cache.json"), time.time())
+            fresh[asked] = {"at": time.time(), "answer": answer}
+            write_state("pixabay-cache.json", fresh)
     found = []
-    for hit in (answer.get("hits") or [])[:per_page]:
+    for hit in (answer.get("hits") or [])[start : start + per_page]:
         user, user_id = hit.get("user"), hit.get("user_id")
         found.append(
             image(

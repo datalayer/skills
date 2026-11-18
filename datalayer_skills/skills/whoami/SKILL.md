@@ -12,6 +12,7 @@ author: Datalayer
 env:
   required:
     - DATALAYER_API_KEY
+  optional:
     - DATALAYER_RUN_URL
 ---
 
@@ -20,10 +21,12 @@ env:
 Retrieve the authenticated user's profile from the Datalayer IAM API.
 An authenticated user on the Datalayer platform is required to use this skill.
 
-## Required Environment Variables
+## Environment Variables
 
 - `DATALAYER_API_KEY` — API key for Datalayer IAM authentication.
 - `DATALAYER_RUN_URL` — Base URL of the Datalayer platform (e.g. `https://prod1.datalayer.run`).
+  Optional for activation: the `run_url` kwarg gives it as well. Either one is enough; with
+  neither, the script says so.
 
 ## Invocation Contract
 

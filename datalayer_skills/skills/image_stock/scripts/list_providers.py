@@ -14,6 +14,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import email.utils
+import fcntl
 import html
 import json
 import os
@@ -157,22 +160,45 @@ def read_state(name: str) -> dict:
 
 
 def write_state(name: str, state: dict) -> None:
+    """Keep a state file, or refuse: a request whose count cannot be kept is not sent."""
     path = state_file(name)
+    temporary = f"{path}.{os.getpid()}.{threading.get_ident()}"
     try:
-        with open(f"{path}.{os.getpid()}", "w", encoding="utf-8") as handle:
+        with open(temporary, "w", encoding="utf-8") as handle:
             json.dump(state, handle)
-        os.replace(f"{path}.{os.getpid()}", path)
-    except OSError:
-        pass  # Counting is best effort where nothing can be written.
+        os.replace(temporary, path)
+    except OSError as error:
+        raise StockRefused(
+            f"the image-stock state could not be saved ({type(error).__name__}): set "
+            "IMAGE_STOCK_STATE_DIR to a folder that can be written."
+        ) from None
 
 
-#: A search of every provider asks them at once: one at a time counts.
-COUNTING = threading.Lock()
+#: A search of every provider asks them at once: one thread at a time in a state file.
+COUNTING = threading.RLock()
+
+
+@contextlib.contextmanager
+def state_locked(name: str):
+    """One read, check and write of a state file at a time, across threads and processes."""
+    with COUNTING:
+        try:
+            lock = os.open(state_file(f"{name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as error:
+            raise StockRefused(
+                f"the image-stock state could not be locked ({type(error).__name__}): set "
+                "IMAGE_STOCK_STATE_DIR to a folder that can be written."
+            ) from None
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(lock)  # Closing it releases the lock.
 
 
 def take_request(provider: str) -> None:
     """Count one request to a provider, or refuse it when its limit is reached."""
-    with COUNTING:
+    with state_locked("rate.json"):
         count_request(provider)
 
 
@@ -197,23 +223,39 @@ def count_request(provider: str) -> None:
 
 
 def block_until(provider: str, seconds: float) -> None:
-    with COUNTING:
+    """Ask a provider nothing for ``seconds``, its whole deadline; a later one kept is kept."""
+    with state_locked("rate.json"):
         state = read_state("rate.json")
         entry = state.get(provider) if isinstance(state.get(provider), dict) else {}
-        entry["blocked_until"] = time.time() + max(1.0, min(seconds, 3600.0))
+        until = time.time() + max(1.0, seconds)
+        entry["blocked_until"] = max(until, float(entry.get("blocked_until") or 0))
         state[provider] = entry
         write_state("rate.json", state)
+
+
+def wait_asked(headers, default: float) -> float:
+    """The wait a provider asks for: its Retry-After (seconds or a date), else its reset."""
+    retry = str((headers or {}).get("Retry-After") or "").strip()
+    if retry.isdigit():
+        return float(retry)
+    if retry:
+        try:
+            return email.utils.parsedate_to_datetime(retry).timestamp() - time.time()
+        except (TypeError, ValueError, IndexError):
+            pass
+    reset = str((headers or {}).get("X-Ratelimit-Reset") or "").strip()
+    if reset.isdigit():
+        seconds = float(reset)
+        # A date, in seconds since 1970, and not a delay.
+        return seconds - time.time() if seconds > 10_000_000 else seconds
+    return default
 
 
 def note_remaining(provider: str, headers) -> None:
     """Stop asking a provider that says no request is left, until it has some again."""
     if str(headers.get("X-Ratelimit-Remaining") or "").strip() != "0":
         return
-    reset = str(headers.get("X-Ratelimit-Reset") or "").strip()
-    seconds = float(reset) if reset.isdigit() else 900.0
-    if seconds > 10_000_000:  # A date, in seconds since 1970, and not a delay.
-        seconds -= time.time()
-    block_until(provider, seconds)
+    block_until(provider, wait_asked(headers, 900.0))
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -255,7 +297,7 @@ def api_get(provider: str, url: str, headers: dict) -> dict:
             body = response.read(MAX_JSON_BYTES + 1)
     except urllib.error.HTTPError as error:
         if error.code == 429:
-            block_until(provider, 60.0)
+            block_until(provider, wait_asked(error.headers, 60.0))
         raise StockRefused(refusal_of(provider, error.code)) from None
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         reason = getattr(error, "reason", None) or type(error).__name__
@@ -302,7 +344,7 @@ def credit(
 
     def linked(kind: str, text: str, url: str) -> str:
         if not url or kind == "text":
-            return text
+            return html.escape(text) if kind == "html" else text
         if kind == "markdown":
             return f"[{text}]({url})"
         return f'<a href="{html.escape(url, quote=True)}">{html.escape(text)}</a>'

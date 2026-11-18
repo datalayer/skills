@@ -17,11 +17,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import email.utils
+import fcntl
 import html
+import http.client
 import ipaddress
 import json
 import os
 import socket
+import ssl
 import sys
 import tempfile
 import threading
@@ -162,22 +167,45 @@ def read_state(name: str) -> dict:
 
 
 def write_state(name: str, state: dict) -> None:
+    """Keep a state file, or refuse: a request whose count cannot be kept is not sent."""
     path = state_file(name)
+    temporary = f"{path}.{os.getpid()}.{threading.get_ident()}"
     try:
-        with open(f"{path}.{os.getpid()}", "w", encoding="utf-8") as handle:
+        with open(temporary, "w", encoding="utf-8") as handle:
             json.dump(state, handle)
-        os.replace(f"{path}.{os.getpid()}", path)
-    except OSError:
-        pass  # Counting is best effort where nothing can be written.
+        os.replace(temporary, path)
+    except OSError as error:
+        raise StockRefused(
+            f"the image-stock state could not be saved ({type(error).__name__}): set "
+            "IMAGE_STOCK_STATE_DIR to a folder that can be written."
+        ) from None
 
 
-#: A search of every provider asks them at once: one at a time counts.
-COUNTING = threading.Lock()
+#: A search of every provider asks them at once: one thread at a time in a state file.
+COUNTING = threading.RLock()
+
+
+@contextlib.contextmanager
+def state_locked(name: str):
+    """One read, check and write of a state file at a time, across threads and processes."""
+    with COUNTING:
+        try:
+            lock = os.open(state_file(f"{name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as error:
+            raise StockRefused(
+                f"the image-stock state could not be locked ({type(error).__name__}): set "
+                "IMAGE_STOCK_STATE_DIR to a folder that can be written."
+            ) from None
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(lock)  # Closing it releases the lock.
 
 
 def take_request(provider: str) -> None:
     """Count one request to a provider, or refuse it when its limit is reached."""
-    with COUNTING:
+    with state_locked("rate.json"):
         count_request(provider)
 
 
@@ -202,23 +230,39 @@ def count_request(provider: str) -> None:
 
 
 def block_until(provider: str, seconds: float) -> None:
-    with COUNTING:
+    """Ask a provider nothing for ``seconds``, its whole deadline; a later one kept is kept."""
+    with state_locked("rate.json"):
         state = read_state("rate.json")
         entry = state.get(provider) if isinstance(state.get(provider), dict) else {}
-        entry["blocked_until"] = time.time() + max(1.0, min(seconds, 3600.0))
+        until = time.time() + max(1.0, seconds)
+        entry["blocked_until"] = max(until, float(entry.get("blocked_until") or 0))
         state[provider] = entry
         write_state("rate.json", state)
+
+
+def wait_asked(headers, default: float) -> float:
+    """The wait a provider asks for: its Retry-After (seconds or a date), else its reset."""
+    retry = str((headers or {}).get("Retry-After") or "").strip()
+    if retry.isdigit():
+        return float(retry)
+    if retry:
+        try:
+            return email.utils.parsedate_to_datetime(retry).timestamp() - time.time()
+        except (TypeError, ValueError, IndexError):
+            pass
+    reset = str((headers or {}).get("X-Ratelimit-Reset") or "").strip()
+    if reset.isdigit():
+        seconds = float(reset)
+        # A date, in seconds since 1970, and not a delay.
+        return seconds - time.time() if seconds > 10_000_000 else seconds
+    return default
 
 
 def note_remaining(provider: str, headers) -> None:
     """Stop asking a provider that says no request is left, until it has some again."""
     if str(headers.get("X-Ratelimit-Remaining") or "").strip() != "0":
         return
-    reset = str(headers.get("X-Ratelimit-Reset") or "").strip()
-    seconds = float(reset) if reset.isdigit() else 900.0
-    if seconds > 10_000_000:  # A date, in seconds since 1970, and not a delay.
-        seconds -= time.time()
-    block_until(provider, seconds)
+    block_until(provider, wait_asked(headers, 900.0))
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -260,7 +304,7 @@ def api_get(provider: str, url: str, headers: dict) -> dict:
             body = response.read(MAX_JSON_BYTES + 1)
     except urllib.error.HTTPError as error:
         if error.code == 429:
-            block_until(provider, 60.0)
+            block_until(provider, wait_asked(error.headers, 60.0))
         raise StockRefused(refusal_of(provider, error.code)) from None
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         reason = getattr(error, "reason", None) or type(error).__name__
@@ -307,7 +351,7 @@ def credit(
 
     def linked(kind: str, text: str, url: str) -> str:
         if not url or kind == "text":
-            return text
+            return html.escape(text) if kind == "html" else text
         if kind == "markdown":
             return f"[{text}]({url})"
         return f'<a href="{html.escape(url, quote=True)}">{html.escape(text)}</a>'
@@ -340,11 +384,15 @@ def run(main) -> None:
 
 MAX_IMAGE_BYTES = 40 * 1024 * 1024
 
-#: Where each provider serves its images from: a download goes nowhere else.
+#: Where each provider serves its images from: a download, and every redirect of it, goes
+#: nowhere else. A name starting with a dot stands for that domain's hosts: Freepik hands out
+#: signed links on its own hosts (img.freepik.com, downloadscdn5.freepik.com…), under
+#: either of its two names.
 IMAGE_HOSTS = {
     "unsplash": ("images.unsplash.com", "plus.unsplash.com"),
     "pexels": ("images.pexels.com",),
     "pixabay": ("pixabay.com", "cdn.pixabay.com"),
+    "freepik": (".freepik.com", ".magnific.com"),
 }
 
 EXTENSIONS = {
@@ -357,25 +405,60 @@ EXTENSIONS = {
 }
 
 
-def public_https(url: str, hosts: tuple = ()) -> str:
-    """The URL when it is https, on one of ``hosts`` when given, and at a public address."""
+def on_hosts(host: str, hosts: tuple) -> bool:
+    """Whether ``host`` is one of ``hosts``; a name starting with a dot is a whole domain."""
+    return any(
+        host.endswith(allowed) if allowed.startswith(".") else host == allowed for allowed in hosts
+    )
+
+
+def public_address(host: str, port: int = 443) -> str:
+    """The address ``host`` resolves to, when every address it has is public; else refused."""
+    try:
+        addresses = [info[4][0] for info in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)]
+    except OSError:
+        raise StockRefused(f"{host} could not be found.") from None
+    if not addresses:
+        raise StockRefused(f"{host} could not be found.")
+    for address in addresses:
+        if not ipaddress.ip_address(address.split("%")[0]).is_global:
+            raise StockRefused(f"{host} is not a public address.")
+    return addresses[0]
+
+
+def public_https(url: str, hosts: tuple) -> str:
+    """The URL when it is https, on one of ``hosts``, and at a public address."""
     parts = urllib.parse.urlsplit(url or "")
     host = (parts.hostname or "").lower()
     if parts.scheme != "https" or not host or parts.username or parts.password:
         raise StockRefused("an image is downloaded from an https address alone.")
-    if hosts and host not in hosts:
+    if not on_hosts(host, hosts):
         raise StockRefused(
             f"{host} is not where this provider serves its images ({', '.join(hosts)}): "
             "give the full_url search_images returned."
         )
-    try:
-        addresses = {info[4][0] for info in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
-    except OSError:
-        raise StockRefused(f"{host} could not be found.") from None
-    for address in addresses:
-        if not ipaddress.ip_address(address.split("%")[0]).is_global:
-            raise StockRefused(f"{host} is not a public address.")
+    public_address(host, parts.port or 443)
     return url
+
+
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connects to the address it checked, resolving the name once; TLS still checks the name.
+
+    The name is resolved, every address checked public, and the socket opened to the address
+    checked: a second answer of the name (DNS rebinding) is never asked for. No proxy.
+    """
+
+    def connect(self) -> None:
+        address = public_address(self.host, self.port)
+        sock = socket.create_connection((address, self.port), self.timeout, self.source_address)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    """Every https connection of a download, its redirects too, through PinnedHTTPSConnection."""
+
+    def https_open(self, req):
+        return self.do_open(PinnedHTTPSConnection, req, context=ssl.create_default_context())
 
 
 class CheckedRedirect(urllib.request.HTTPRedirectHandler):
@@ -389,19 +472,71 @@ class CheckedRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def download_handlers(hosts: tuple) -> tuple:
+    """No proxy, every connection pinned to its checked address, redirects checked."""
+    return (urllib.request.ProxyHandler({}), PinnedHTTPSHandler(), CheckedRedirect(hosts))
+
+
+OUTSIDE = "the image is written under the working directory: give a relative path."
+
+
+def under(workspace: str, path: str) -> bool:
+    return os.path.commonpath([workspace, path]) == workspace
+
+
 def inside_workspace(output: str, provider: str, image_id: str) -> str:
-    """Where the file goes: the path given, or one named after the image, under the workspace."""
+    """Where the file goes, before anything is asked: the path given, or one named after the
+    image, under the workspace. Checked again, for good, when the file is written."""
     workspace = os.path.realpath(os.getcwd())
     if not output:
         safe_id = "".join(c for c in image_id if c.isalnum() or c in "-_")[:80] or "image"
         folder = setting("IMAGE_STOCK_DOWNLOAD_DIR", "images")
         output = os.path.join(folder, f"{provider}-{safe_id}")
-    path = os.path.realpath(os.path.join(workspace, output))
-    if os.path.commonpath([workspace, path]) != workspace:
-        raise StockRefused(
-            "the image is written under the working directory: give a relative path."
-        )
+    path = os.path.normpath(os.path.join(workspace, output))
+    if not under(workspace, path) or path == workspace:
+        raise StockRefused(OUTSIDE)
     return path
+
+
+def write_inside_workspace(path: str, body: bytes) -> str:
+    """Write ``body`` at ``path``, its final name, never outside the workspace.
+
+    The folder is opened and where it truly is checked through the open folder itself, then
+    the file is written beside it under a fresh name, never following a link, and renamed
+    over ``path``: a link there is replaced, not followed.
+    """
+    workspace = os.path.realpath(os.getcwd())
+    folder, name = os.path.split(os.path.normpath(path))
+    if not name or name in (".", "..") or not under(workspace, os.path.realpath(folder)):
+        raise StockRefused(OUTSIDE)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        folder_fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as error:
+        raise StockRefused(f"the folder could not be made ({type(error).__name__}).") from None
+    try:
+        held = f"/proc/self/fd/{folder_fd}"
+        where = os.path.realpath(held) if os.path.exists(held) else os.path.realpath(folder)
+        if not under(workspace, where):
+            raise StockRefused(OUTSIDE)
+        part = f".{name}.{os.getpid()}.part"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            file_fd = os.open(part, flags, 0o644, dir_fd=folder_fd)
+            with os.fdopen(file_fd, "wb") as handle:
+                handle.write(body)
+            os.replace(part, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
+        except OSError as error:
+            try:
+                os.unlink(part, dir_fd=folder_fd)
+            except OSError:
+                pass
+            raise StockRefused(
+                f"the image could not be written ({type(error).__name__})."
+            ) from None
+    finally:
+        os.close(folder_fd)
+    return os.path.join(folder, name)
 
 
 def fetch(provider: str, url: str, path: str, hosts: tuple) -> dict:
@@ -411,7 +546,7 @@ def fetch(provider: str, url: str, path: str, hosts: tuple) -> dict:
     )
     label = PROVIDERS[provider]["label"]
     try:
-        with open_url(request, timeout_seconds(), (CheckedRedirect(hosts),)) as response:
+        with open_url(request, timeout_seconds(), download_handlers(hosts)) as response:
             kind = str(response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if not kind.startswith("image/"):
                 raise StockRefused(f"{label} did not answer with an image ({kind or 'no type'}).")
@@ -427,10 +562,8 @@ def fetch(provider: str, url: str, path: str, hosts: tuple) -> dict:
         raise StockRefused(f"{label} answered an empty file.")
     if not os.path.splitext(path)[1]:
         path += EXTENSIONS.get(kind, ".img")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as handle:
-        handle.write(body)
-    return {"path": os.path.relpath(path), "bytes": len(body), "content_type": kind}
+    written = write_inside_workspace(path, body)
+    return {"path": os.path.relpath(written), "bytes": len(body), "content_type": kind}
 
 
 def report_unsplash_download(key: str, image_id: str, download_location: str) -> bool:
@@ -489,22 +622,22 @@ def main() -> dict:
     key = setting(PROVIDERS[provider]["key"])
     image_id = str(args.id).strip()
     path = inside_workspace(args.output.strip(), provider, image_id)
-    if provider == "freepik":
-        saved = fetch(provider, freepik_file_url(key, image_id), path, ())
-    else:
-        if not args.url.strip():
-            raise StockRefused("give the image's full_url, as search_images returned it.")
-        saved = fetch(provider, args.url.strip(), path, IMAGE_HOSTS[provider])
-    result = {"provider": provider, "id": image_id, **saved}
+    if provider != "freepik" and not args.url.strip():
+        raise StockRefused("give the image's full_url, as search_images returned it.")
+    reported = {}
     if provider == "unsplash":
+        # Unsplash is told first, as its guidelines ask: untold, the image is not downloaded.
         try:
-            result["reported_to_unsplash"] = report_unsplash_download(
-                key, image_id, args.download_location.strip()
-            )
+            report_unsplash_download(key, image_id, args.download_location.strip())
         except StockRefused as refusal:
-            # The file is kept; that Unsplash was not told is said, not hidden.
-            result["reported_to_unsplash"] = False
-            result["warning"] = f"The download could not be reported to Unsplash: {refusal}"
+            raise StockRefused(
+                f"the download could not be reported to Unsplash, so the image was not "
+                f"downloaded: {refusal}"
+            ) from None
+        reported = {"reported_to_unsplash": True}
+    url = freepik_file_url(key, image_id) if provider == "freepik" else args.url.strip()
+    saved = fetch(provider, url, path, IMAGE_HOSTS[provider])
+    result = {"provider": provider, "id": image_id, **saved, **reported}
     result["credit"] = PROVIDERS[provider]["credit"]
     result["next"] = (
         "Get the credit line with image_attribution and put it where the image is used."
