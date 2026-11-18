@@ -57,13 +57,66 @@ loads them from the entry points, with no skill spec of their own.
 | `events` | `event` | Events of an agent created, read, listed and updated |
 | `github` | `list_repos`, `get_repo`, `list_issues`, `list_prs`, `search_repos` | Repositories, issues and pull requests read from GitHub (needs a token) |
 | `image` | `image_info`, `resize_image`, `crop_image`, `convert_image`, `optimize_image`, `thumbnail_image`, `snapshot_page`, `snapshot_video_frame` | Snapshots of pages and video frames; images read, resized, cropped, converted, optimized and thumbnailed |
+| `image-stock` | `list_providers`, `search_images`, `image_attribution`, `download_image` | Stock photos searched on Unsplash, Pexels, Pixabay and Freepik (the ones a key is set for), the credit line each asks for, a photo downloaded into the workspace |
 | `pdf` | `check_fillable_fields`, `extract_form_field_info`, `fill_fillable_fields`, `fill_pdf_form_with_annotations`, `convert_pdf_to_images`, `check_bounding_boxes`, `create_validation_image` | PDF forms checked, their fields read and filled, pages turned to images |
 | `text-summarizer` | `summarize` | A text shortened to its key sentences or points |
 | `video` | `record_and_zoom`, `save_to_space`, `video_info`, `record_page`, `trim_video`, `zoom_video`, `transcode_video`, `optimize_video`, `video_thumbnail`, `video_to_gif`, `concat_videos` | Pages recorded and zoomed as an MP4 to share, kept in the person's Space; videos read, trimmed, zoomed in and out, transcoded, optimized, framed, turned to GIF and joined |
 
-The eight last ones were bundled with agent-skills until its 1.3.0, as
+`accounting`, `crawl`, `events`, `github`, `image`, `pdf`, `text-summarizer`
+and `video` were bundled with agent-skills until its 1.3.0, as
 `agent_skills.skills.<name>`. They are `datalayer_skills.skills.<name>` now,
 under the same skill names, and agent-skills is the framework alone.
+
+## The environment a skill needs
+
+A skill says in its `SKILL.md` frontmatter (`env`) which environment variables
+it reads, and agent-skills (1.5.0 and later) offers it to an agent only when it
+has what it needs: `github` needs `GITHUB_TOKEN`, `events` and
+`datalayer-whoami` need `DATALAYER_API_KEY`, and `image-stock` needs one key at
+least among its providers'. A skill without its environment is not listed and
+cannot be run.
+
+## Stock images
+
+`image-stock` searches stock photos on the providers a key is set for. Every
+variable is optional, and one key is enough:
+
+| Variable | What it is |
+|----------|------------|
+| `UNSPLASH_ACCESS_KEY` | An Unsplash application's access key ([unsplash.com/developers](https://unsplash.com/developers)) |
+| `PEXELS_API_KEY` | A Pexels API key ([pexels.com/api](https://www.pexels.com/api/)) |
+| `PIXABAY_API_KEY` | A Pixabay API key ([pixabay.com/api/docs](https://pixabay.com/api/docs/)) |
+| `FREEPIK_API_KEY` | A Freepik API key, now issued as a Magnific one ([magnific.com/api](https://www.magnific.com/api)) |
+| `UNSPLASH_TIER` | `production` once Unsplash approved the application (1000 requests an hour instead of 50) |
+| `UNSPLASH_APP_NAME` | The application's name at Unsplash, written in the links back to it |
+| `FREEPIK_REQUESTS_PER_MINUTE` | The limit kept for Freepik (30 unless set) |
+| `IMAGE_STOCK_DEFAULT_PROVIDER` | The provider searched when none is named and it is configured |
+| `IMAGE_STOCK_DOWNLOAD_DIR` | The folder downloads go to, under the working directory (`images`) |
+| `IMAGE_STOCK_TIMEOUT_SECONDS` | The wait for a provider, 1 to 25 (10) |
+
+With no key the skill is not activated. With some, only those providers are
+offered, and a search of all providers covers exactly those:
+
+```bash
+export PEXELS_API_KEY=...
+python datalayer_skills/skills/image_stock/scripts/list_providers.py
+python datalayer_skills/skills/image_stock/scripts/search_images.py "mountain lake" --per-page 3
+python datalayer_skills/skills/image_stock/scripts/image_attribution.py --provider pexels \
+  --author "Jane Doe" --page-url https://www.pexels.com/photo/lake-123/
+python datalayer_skills/skills/image_stock/scripts/download_image.py --provider pexels --id 123 \
+  --url https://images.pexels.com/photos/123/lake.jpeg
+```
+
+Results have one shape whatever the provider (`id`, `provider`, `title`,
+`author`, `author_url`, `page_url`, `preview_url`, `full_url`, `width`,
+`height`, `license`, `credit_required`, `credit`). The scripts keep to each
+provider's terms: its published rate limit, counted between runs; the credit
+line in the form it asks for (Unsplash's and Pexels' are required, Freepik's
+for a free resource, Pixabay's appreciated); an Unsplash download reported to
+Unsplash; a Pixabay answer kept for a day, and its images downloaded rather
+than linked. A download is fetched over https from the provider's own image
+hosts and written under the working directory. The scripts use the standard
+library alone and never print a key.
 
 ## Recording a page, zoomed, to share
 

@@ -8,6 +8,11 @@ tags:
   - orchestration
   - scheduling
 author: Datalayer
+env:
+  required:
+    - DATALAYER_API_KEY
+  optional:
+    - DATALAYER_AI_AGENTS_URL
 ---
 
 # Events Skill

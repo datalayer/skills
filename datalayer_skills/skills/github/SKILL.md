@@ -9,6 +9,9 @@ tags:
   - repositories
   - git
 author: Datalayer
+env:
+  required:
+    - GITHUB_TOKEN
 ---
 
 # GitHub Skill

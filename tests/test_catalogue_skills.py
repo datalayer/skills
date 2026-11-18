@@ -47,6 +47,10 @@ CATALOGUE = {
             "snapshot_video_frame",
         ],
     ),
+    "image-stock": (
+        "image_stock",
+        ["list_providers", "search_images", "image_attribution", "download_image"],
+    ),
     "pdf": (
         "pdf",
         [
@@ -84,7 +88,7 @@ CATALOGUE = {
 }
 
 #: The skills whose SKILL.md names its scripts as `script_name: <script>`.
-SCRIPT_NAMED = ("accounting", "image", "video")
+SCRIPT_NAMED = ("accounting", "image", "image-stock", "video")
 
 #: The skills whose SKILL.md says they are public (`metadata.visibility: public`) and that need no
 #: secret: what a company may publish to people's personal agents. `github` and `events` need a
@@ -150,6 +154,12 @@ def test_a_public_skill_says_so_and_needs_no_secret(name: str) -> None:
         r"^## Required Environment Variables\s*$(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL
     )
     needs_a_secret = bool(section and re.search(r"`[A-Z][A-Z0-9_]+`", section.group(1)))
+    # A skill that needs one key among several (its frontmatter's `env.any_of`) needs a secret too.
+    declared = AgentSkill.from_module(f"datalayer_skills.skills.{CATALOGUE[name][0]}")
+    needs_a_secret = needs_a_secret or bool(declared.get_any_of_env_vars())
+    assert (
+        bool(declared.get_required_env_vars() or declared.get_any_of_env_vars()) == needs_a_secret
+    )
     assert (skill.metadata.metadata.get("visibility") == "public") == (name in PUBLIC)
     assert needs_a_secret == (name not in PUBLIC), name
 
