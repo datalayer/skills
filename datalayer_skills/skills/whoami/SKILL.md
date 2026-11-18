@@ -9,6 +9,10 @@ tags:
   - identity
   - authentication
 author: Datalayer
+env:
+  required:
+    - DATALAYER_API_KEY
+    - DATALAYER_RUN_URL
 ---
 
 # Datalayer Whoami Skill

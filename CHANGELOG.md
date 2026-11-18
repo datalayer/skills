@@ -6,6 +6,13 @@
 
 # Changelog
 
+## 0.7.0
+
+18 November 2026.
+
+- **Stock images.** `image-stock` searches stock photos on Unsplash, Pexels, Pixabay and Freepik: `search_images "<query>"` on one provider or on every configured one (results merged, one of each provider in turn, in one shape: `id`, `provider`, `title`, `author`, `author_url`, `page_url`, `preview_url`, `full_url`, `width`, `height`, `license`, `credit_required`, `credit`), `list_providers` (which are configured, with their limits and terms), `image_attribution` (the credit line a provider asks for, as text, Markdown and HTML) and `download_image` (a photo into the workspace). Every variable is optional and one key is enough: `UNSPLASH_ACCESS_KEY`, `PEXELS_API_KEY`, `PIXABAY_API_KEY`, `FREEPIK_API_KEY`; a provider without its key is not offered, and with no key the skill is not activated. It keeps to each provider's terms: its published rate limit counted between runs (50 or 1000 an hour for Unsplash by `UNSPLASH_TIER`, 200 an hour for Pexels, 100 a minute for Pixabay, `FREEPIK_REQUESTS_PER_MINUTE` or 30 for Freepik), the credit in the provider's form, an Unsplash download reported to Unsplash, a Pixabay answer kept a day and its images downloaded rather than linked. A key goes to its provider's API host alone, with no redirect followed; an image comes over https from the provider's image hosts, up to 40 MB, under the working directory; no message carries a key or a request's address. Standard library only.
+- **Skills say the environment they need.** `github` (`GITHUB_TOKEN`), `events` (`DATALAYER_API_KEY`; `DATALAYER_AI_AGENTS_URL` is optional and no longer read as required) and `datalayer-whoami` declare it in their frontmatter's `env`, as `image-stock` declares its keys under `env.any_of`. With `agent_skills>=1.5.0`, now required, a skill without its environment is not offered to the agent: not listed, not run.
+
 ## 0.6.1
 
 15 November 2026.
