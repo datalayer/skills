@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.7.7
+
+18 November 2026.
+
+- **Stock images, the doc says every outcome.** When the folder is moved out while the image is written, an empty or zero-filled file may remain in it, or, when its bytes cannot be removed, the image itself, as the refusal says: a refusal is not a promise that no image data is left outside the working directory.
+
 ## 0.7.6
 
 18 November 2026.
