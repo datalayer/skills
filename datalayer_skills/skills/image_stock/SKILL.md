@@ -128,7 +128,7 @@ run. `search_images` with `provider: all` searches exactly those.
 - Prints `{"provider", "id", "path", "bytes", "content_type", "credit", "next"}`, and `reported_to_unsplash` for Unsplash.
 - An Unsplash download is reported to Unsplash first: when it cannot be, the image is not downloaded and the refusal says why.
 - An image is fetched over https from the provider's own image hosts alone (Freepik's on `freepik.com` or `magnific.com`), redirects included, each connection made to the public address checked, up to 40 MB.
-- The file is written under the working directory alone: a link at the path is replaced, never followed, and a folder that is a link is refused, even one pointing inside it: give a real folder. A folder moved out of it while the image is written gets a refusal, and the image's bytes are destroyed; an empty file may remain in that folder.
+- The file is written under the working directory alone: a link at the path is replaced, never followed, and a folder that is a link is refused, even one pointing inside it: give a real folder. A folder moved out of it while the image is written gets a refusal. The image's bytes are then destroyed through the file's own descriptor when they can be, so an empty or zero-filled file may remain in that folder; when they cannot be, the refusal says so, and the image itself may remain there. A refusal is not a promise that no image data is left outside the working directory: read its sentence.
 
 ## Common Failure Modes
 

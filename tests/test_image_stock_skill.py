@@ -1447,6 +1447,12 @@ def test_a_truncation_that_fails_is_said_and_zeros_take_its_place(workspace, mon
     assert "its bytes could not be removed (OSError)" in str(refused.value)
 
 
+def test_the_doc_says_what_a_moved_folder_may_keep() -> None:
+    text = (SCRIPTS.parent / "SKILL.md").read_text()
+    for said in ("empty or zero-filled file", "the image itself may remain", "not a promise"):
+        assert said in text
+
+
 def test_whoami_activates_with_the_key_its_url_given_either_way() -> None:
     text = (SCRIPTS.parents[1] / "whoami" / "SKILL.md").read_text()
     front = text.split("---")[1]
