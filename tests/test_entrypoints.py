@@ -18,6 +18,13 @@ MEMORY_SKILLS = {
     "datalayer-memory-delete": ("datalayer_skills.skills.memory_delete", ["delete", "delete_all"]),
 }
 
+LIBRARY_SKILL = {
+    "datalayer-library-publish": (
+        "datalayer_skills.skills.library_publish",
+        ["publish_item"],
+    )
+}
+
 
 def _ours() -> dict[str, str]:
     return {
@@ -32,6 +39,8 @@ def test_the_package_declares_each_skill_under_its_name() -> None:
     assert declared["datalayer-whoami"] == "datalayer_skills.skills.whoami"
     for name, (module, _) in MEMORY_SKILLS.items():
         assert declared[name] == module
+    for name, (module, _) in LIBRARY_SKILL.items():
+        assert declared[name] == module
 
 
 def test_agent_skills_discovers_them_with_their_scripts() -> None:
@@ -43,6 +52,10 @@ def test_agent_skills_discovers_them_with_their_scripts() -> None:
         # No environment variable is required: the runtime is on the loopback.
         assert skill.get_required_env_vars() == []
         assert "memory" in skill.tags
+    for name, (_, scripts) in LIBRARY_SKILL.items():
+        skill = discovered[name]
+        assert [script.name for script in skill.scripts] == scripts
+        assert skill.get_required_env_vars() == []
 
 
 def test_each_entry_point_names_the_skill_its_skill_md_declares() -> None:

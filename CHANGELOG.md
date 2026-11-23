@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.7.8
+
+23 November 2026.
+
+- **Publish owned items to the public Library.** `datalayer-library-publish` publishes an existing notebook, document, cell, spreadsheet, deck, learning item, dataset, benchmark, agent, data server, environment, report, investigation, evaluator or application through the owning agent runtime. It requires the person's explicit confirmation immediately before publishing, exposes no credential to the sandbox and returns the public Library URL.
+
 ## 0.7.7
 
 18 November 2026.

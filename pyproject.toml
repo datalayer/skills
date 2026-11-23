@@ -79,6 +79,7 @@ travel-planning = "datalayer_skills.skills.travel_planning"
 fare-and-stay-comparison = "datalayer_skills.skills.fare_and_stay_comparison"
 dining = "datalayer_skills.skills.dining"
 datalayer-email = "datalayer_skills.skills.email"
+datalayer-library-publish = "datalayer_skills.skills.library_publish"
 
 [tool.hatch.version]
 path = "datalayer_skills/__version__.py"
