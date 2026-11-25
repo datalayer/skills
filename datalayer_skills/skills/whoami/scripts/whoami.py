@@ -28,6 +28,7 @@ Environment:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import sys
@@ -41,6 +42,32 @@ ROUTE = "/api/v1/owner"
 
 class WhoamiRefused(Exception):
     """Why nobody was said, in the runtime's sentence."""
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """The runtime is asked where it is: a redirect elsewhere is not followed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        host = urllib.parse.urlsplit(newurl).netloc or "another address"
+        raise WhoamiRefused(
+            f"The agent runtime answered with a redirect to {host} ({code}), which is not followed."
+        )
+
+
+def timeout_seconds() -> float:
+    """How long to wait for the runtime: $DATALAYER_WHOAMI_TIMEOUT_SECONDS, else 30."""
+    raw = os.environ.get("DATALAYER_WHOAMI_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return 30.0
+    try:
+        seconds = float(raw)
+    except ValueError:
+        seconds = 0.0
+    if not 0 < seconds < float("inf"):
+        raise WhoamiRefused(
+            f"DATALAYER_WHOAMI_TIMEOUT_SECONDS is {raw!r}: give a number of seconds above 0."
+        )
+    return seconds
 
 
 def runtime_url(explicit: str = "") -> str:
@@ -59,13 +86,20 @@ def whoami_from_runtime(base: str, agent: str = "") -> dict:
     if agent:
         url += "?" + urllib.parse.urlencode({"agent": agent})
     request = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
-    # Never through a proxy: the runtime is in this pod.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    # Never through a proxy, and never through a redirect: the runtime is in this pod.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    timeout = timeout_seconds()
     try:
-        with opener.open(request, timeout=30) as response:
+        with opener.open(request, timeout=timeout) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
-        raw = error.read()
+        try:
+            raw = error.read()
+        except (OSError, http.client.HTTPException) as cut:
+            raise WhoamiRefused(
+                f"The agent runtime at {base} answered {error.code} and its answer was cut "
+                f"short ({type(cut).__name__})."
+            ) from cut
         try:
             detail = json.loads(raw or b"{}").get("detail") or ""
         except (ValueError, AttributeError):
@@ -74,9 +108,19 @@ def whoami_from_runtime(base: str, agent: str = "") -> dict:
             detail = json.dumps(detail)
         raise WhoamiRefused(detail or f"The runtime answered {error.code}.") from error
     except urllib.error.URLError as error:
+        if isinstance(error.reason, ConnectionRefusedError):
+            raise WhoamiRefused(
+                f"The agent runtime at {base} cannot be reached ({error.reason}), and no key "
+                "was given: run it in a Datalayer runtime, or pass --api-key and --run-url."
+            ) from error
         raise WhoamiRefused(
-            f"The agent runtime at {base} cannot be reached ({error.reason}), and no key was "
-            "given: run it in a Datalayer runtime, or pass --api-key and --run-url."
+            f"The agent runtime at {base} did not answer ({error.reason})."
+        ) from error
+    except (OSError, http.client.HTTPException) as error:
+        # A timeout, a dropped connection, an answer cut short.
+        raise WhoamiRefused(
+            f"The connection to the agent runtime at {base} ended before its answer "
+            f"({type(error).__name__})."
         ) from error
     try:
         profile = json.loads(raw or b"{}")

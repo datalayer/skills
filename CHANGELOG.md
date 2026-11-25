@@ -6,6 +6,14 @@
 
 # Changelog
 
+## 0.7.11
+
+25 November 2026. Review of 0.7.10.
+
+- **A key reaches the one host it was sent to.** With `DATALAYER_API_KEY`, `events` built urllib's default opener, which follows a redirect and keeps the `Authorization` header when the destination is another host or plain HTTP. No request of `events` or `datalayer-whoami` follows a redirect any more, with a key or to the runtime: the script says where the redirect pointed and sends nothing there. A key is not sent over plain HTTP to another machine either (the runtime on the loopback, which is sent no key, stays reachable over HTTP). A test holds every script that puts a credential in a header with urllib to an opener that follows no redirect.
+- **A stalled or truncated answer is a sentence, never a traceback.** A timeout, a dropped connection or an answer cut short, on the answer or on a refusal's body, is said as the script's own refusal (exit code 1) in `events`, `datalayer-whoami` and the five memory scripts. After a `create` or an `update` of `events`, the sentence says the write may already have been made and how to check; nothing is sent twice. `datalayer-library-publish` says the same of a publication the runtime did not confirm. `DATALAYER_EVENTS_TIMEOUT_SECONDS` and `DATALAYER_WHOAMI_TIMEOUT_SECONDS` set how long each waits (30 seconds); a value that is no number of seconds above 0 is refused in a sentence before anything is sent.
+- **An answer that is not what was asked for is refused, not read as an empty success.** `null`, a list or an object without its event from the runtime or the events API ended a memory command or an events command with exit code 0 and nothing in it; each is the script's refusal now. A publication whose refusal arrives cut short says the item may be public already.
+
 ## 0.7.10
 
 25 November 2026.

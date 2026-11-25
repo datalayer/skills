@@ -52,9 +52,23 @@ def publish_item(
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(request, timeout=45) as response:
-            return json.loads(response.read() or b"{}")
+            raw = response.read()
+        try:
+            answer = json.loads(raw or b"{}")
+        except ValueError as error:
+            raise http.client.HTTPException("the answer is not JSON") from error
+        if not isinstance(answer, dict):
+            raise http.client.HTTPException("the answer is not what was asked for")
+        return answer
     except urllib.error.HTTPError as error:
-        raw = error.read()
+        try:
+            raw = error.read()
+        except (OSError, http.client.HTTPException) as cut:
+            raise RuntimeError(
+                f"The agent runtime at {base} answered {error.code} and its answer was cut short "
+                f"({type(cut).__name__}): the item may be public already. Check its public page "
+                "before publishing it again."
+            ) from cut
         try:
             detail = json.loads(raw or b"{}").get("detail") or ""
         except ValueError:
@@ -63,9 +77,16 @@ def publish_item(
             detail = detail.get("message") or json.dumps(detail)
         raise RuntimeError(detail or f"The runtime answered {error.code}.") from error
     except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
-        raise RuntimeError(
-            f"The agent runtime at {base} could not publish the item: {type(error).__name__}."
-        ) from error
+        # A connection never made sent nothing; anything later may have published.
+        never_sent = isinstance(getattr(error, "reason", None), ConnectionRefusedError)
+        why = (
+            f"The agent runtime at {base} cannot be reached: nothing was published."
+            if never_sent
+            else f"The agent runtime at {base} did not confirm the publication "
+            f"({type(error).__name__}): the item may be public already. Check its public page "
+            "before publishing it again."
+        )
+        raise RuntimeError(why) from error
 
 
 def main() -> None:
