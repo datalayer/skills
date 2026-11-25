@@ -57,7 +57,17 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def timeout_seconds() -> float:
     """How long to wait for the runtime: $DATALAYER_WHOAMI_TIMEOUT_SECONDS, else 30."""
     raw = os.environ.get("DATALAYER_WHOAMI_TIMEOUT_SECONDS", "").strip()
-    return float(raw) if raw else 30.0
+    if not raw:
+        return 30.0
+    try:
+        seconds = float(raw)
+    except ValueError:
+        seconds = 0.0
+    if not 0 < seconds < float("inf"):
+        raise WhoamiRefused(
+            f"DATALAYER_WHOAMI_TIMEOUT_SECONDS is {raw!r}: give a number of seconds above 0."
+        )
+    return seconds
 
 
 def runtime_url(explicit: str = "") -> str:
@@ -78,8 +88,9 @@ def whoami_from_runtime(base: str, agent: str = "") -> dict:
     request = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
     # Never through a proxy, and never through a redirect: the runtime is in this pod.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    timeout = timeout_seconds()
     try:
-        with opener.open(request, timeout=timeout_seconds()) as response:
+        with opener.open(request, timeout=timeout) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
         try:

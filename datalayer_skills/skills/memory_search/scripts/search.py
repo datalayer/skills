@@ -86,7 +86,12 @@ def call(method: str, url: str, body: dict | None = None) -> dict:
         answer = json.loads(raw or b"{}")
     except ValueError as error:
         raise MemoryRefused(f"The answer of the agent runtime at {where} is not JSON.") from error
-    return answer if isinstance(answer, dict) else {}
+    if not isinstance(answer, dict):
+        raise MemoryRefused(
+            f"The answer of the agent runtime at {where} is not what was asked for: "
+            "check the memory before doing it again."
+        )
+    return answer
 
 
 def agent_name(base: str, explicit: str = "") -> str:

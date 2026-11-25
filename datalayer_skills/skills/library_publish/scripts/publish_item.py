@@ -57,12 +57,18 @@ def publish_item(
             answer = json.loads(raw or b"{}")
         except ValueError as error:
             raise http.client.HTTPException("the answer is not JSON") from error
-        return answer if isinstance(answer, dict) else {}
+        if not isinstance(answer, dict):
+            raise http.client.HTTPException("the answer is not what was asked for")
+        return answer
     except urllib.error.HTTPError as error:
         try:
             raw = error.read()
-        except (OSError, http.client.HTTPException):
-            raw = b""
+        except (OSError, http.client.HTTPException) as cut:
+            raise RuntimeError(
+                f"The agent runtime at {base} answered {error.code} and its answer was cut short "
+                f"({type(cut).__name__}): the item may be public already. Check its public page "
+                "before publishing it again."
+            ) from cut
         try:
             detail = json.loads(raw or b"{}").get("detail") or ""
         except ValueError:

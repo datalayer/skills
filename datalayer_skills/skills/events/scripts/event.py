@@ -42,7 +42,18 @@ class EventsRefused(Exception):
 def timeout_seconds() -> float:
     """How long to wait for an answer: $DATALAYER_EVENTS_TIMEOUT_SECONDS, else 30."""
     raw = os.environ.get("DATALAYER_EVENTS_TIMEOUT_SECONDS", "").strip()
-    return float(raw) if raw else 30.0
+    if not raw:
+        return 30.0
+    try:
+        seconds = float(raw)
+    except ValueError:
+        seconds = 0.0
+    if not 0 < seconds < float("inf"):
+        raise EventsRefused(
+            f"DATALAYER_EVENTS_TIMEOUT_SECONDS is {raw!r}: give a number of seconds above 0. "
+            "Nothing was sent."
+        )
+    return seconds
 
 
 def _base_url() -> str:
@@ -118,6 +129,7 @@ def _call(
     one host it was sent to, and a write is made once.
     """
     _checked(url, key)
+    timeout = timeout_seconds()
     if params:
         url += "?" + urllib.parse.urlencode(params)
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
@@ -137,7 +149,7 @@ def _call(
         handlers.append(urllib.request.ProxyHandler({}))
     opener = urllib.request.build_opener(*handlers)
     try:
-        with opener.open(request, timeout=timeout_seconds()) as response:
+        with opener.open(request, timeout=timeout) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
         try:
@@ -175,7 +187,17 @@ def _call(
         answer = json.loads(raw or b"{}")
     except ValueError as error:
         raise _unconfirmed(method, f"The answer of {where} is not JSON.") from error
-    return answer if isinstance(answer, dict) else {}
+    if not isinstance(answer, dict):
+        raise _unconfirmed(method, f"The answer of {where} is not what was asked for.")
+    return answer
+
+
+def _event(answer: dict[str, Any], method: str) -> dict[str, Any]:
+    """The event of an answer, refused when the answer holds none."""
+    event = answer.get("event")
+    if not isinstance(event, dict):
+        raise _unconfirmed(method, "The answer names no event.")
+    return event
 
 
 def _direct_url(agent_id: str, event_id: str = "") -> str:
@@ -209,18 +231,21 @@ def create_event(
     }
     key = _key()
     if key:
-        return _call("POST", _direct_url(_agent(agent_id)), body=body, key=key)["event"]
-    return _call("POST", _runtime_event_url(), body={**body, "agent_id": _agent(agent_id)})["event"]
+        return _event(_call("POST", _direct_url(_agent(agent_id)), body=body, key=key), "POST")
+    return _event(
+        _call("POST", _runtime_event_url(), body={**body, "agent_id": _agent(agent_id)}), "POST"
+    )
 
 
 def get_event(event_id: str, agent_id: str | None = None) -> dict[str, Any]:
     key = _key()
     if key:
-        return _call("GET", _direct_url(_agent(agent_id), event_id), key=key)["event"]
+        return _event(_call("GET", _direct_url(_agent(agent_id), event_id), key=key), "GET")
     agent = _agent(agent_id)
-    return _call(
-        "GET", _runtime_event_url(event_id), params={"agent_id": agent} if agent else None
-    )["event"]
+    return _event(
+        _call("GET", _runtime_event_url(event_id), params={"agent_id": agent} if agent else None),
+        "GET",
+    )
 
 
 def list_events(
@@ -269,10 +294,10 @@ def update_event(
     key = _key()
     agent = _agent(agent_id)
     if key:
-        return _call("PATCH", _direct_url(agent, event_id), body=body, key=key)["event"]
+        return _event(_call("PATCH", _direct_url(agent, event_id), body=body, key=key), "PATCH")
     if agent:
         body["agent_id"] = agent
-    return _call("PATCH", _runtime_event_url(event_id), body=body)["event"]
+    return _event(_call("PATCH", _runtime_event_url(event_id), body=body), "PATCH")
 
 
 def _json_arg(value: str | None) -> dict[str, Any]:

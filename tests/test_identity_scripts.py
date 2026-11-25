@@ -430,3 +430,65 @@ def test_every_script_that_sends_a_credential_follows_no_redirect() -> None:
             opener = text[found.end() : found.end() + 200].split("\n\n")[0]
             assert re.search(r"NoRedirect|handlers|Checked", opener), (script, opener)
     assert "events" in checked and "image_stock" in checked
+
+
+# ---- second review of 0.7.11 -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-3", "inf", "nan"])
+def test_a_timeout_that_is_no_number_of_seconds_is_a_sentence(owner, monkeypatch, value) -> None:
+    monkeypatch.setenv("DATALAYER_EVENTS_TIMEOUT_SECONDS", value)
+    monkeypatch.setenv("DATALAYER_WHOAMI_TIMEOUT_SECONDS", value)
+    for script, args, name in (
+        (EVENT, ("list",), "DATALAYER_EVENTS_TIMEOUT_SECONDS"),
+        (EVENT, ("create", "--agent-id", "a", "--title", "t"), "DATALAYER_EVENTS_TIMEOUT_SECONDS"),
+        (WHOAMI, (), "DATALAYER_WHOAMI_TIMEOUT_SECONDS"),
+    ):
+        done = run(script, *args)
+        assert done.returncode == 1 and "Traceback" not in done.stderr, done.stderr
+        assert done.stderr.startswith(f"Error: {name} is") and "above 0" in done.stderr
+    # Refused before anything was sent.
+    assert owner.requests == []
+
+
+@pytest.mark.parametrize("body", [b"null", b"[]", b'"ok"', b'{"total": 1}'])
+def test_an_answer_that_is_not_what_was_asked_for_is_refused(monkeypatch, body) -> None:
+    """Not an empty success: an event read or written names its event."""
+
+    def respond(handler) -> None:
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+
+    server = _Recorder(respond)
+    try:
+        monkeypatch.setenv("AGENT_RUNTIMES_URL", server.url)
+        for name in ("DATALAYER_API_KEY", "AGENT_RUNTIMES_AGENT_ID"):
+            monkeypatch.delenv(name, raising=False)
+        for args in (("get", "evt-1"), ("create", "--agent-id", "a", "--title", "t")):
+            done = run(EVENT, *args)
+            assert done.returncode == 1 and done.stderr.startswith("Error: "), done.stderr
+            assert "Traceback" not in done.stderr
+        assert "may already have been created" in done.stderr
+    finally:
+        server.close()
+
+
+def test_a_publication_whose_refusal_is_cut_short_may_have_been_made(monkeypatch) -> None:
+    """An error status whose body never arrives is no proof nothing was published."""
+    server = _Recorder(_cut_short_refusal)
+    try:
+        monkeypatch.setenv("AGENT_RUNTIMES_URL", server.url)
+        done = run(
+            SKILLS / "library_publish" / "scripts" / "publish_item.py",
+            "doc-1",
+            "document",
+            "--confirm",
+        )
+        assert done.returncode == 1 and "Traceback" not in done.stderr, done.stderr
+        assert "answered 409" in done.stderr and "may be public already" in done.stderr
+        assert len(server.seen) == 1
+    finally:
+        server.close()

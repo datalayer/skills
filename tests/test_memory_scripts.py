@@ -141,3 +141,24 @@ def test_the_runtime_on_the_loopback_by_default(monkeypatch) -> None:
     refused = run("list", "--agent", "default")
     assert refused.returncode == 1
     assert "http://127.0.0.1:9 cannot be reached" in refused.stderr
+
+
+def test_an_answer_that_is_no_object_is_refused_not_an_empty_success(runtime, monkeypatch) -> None:
+    """`null` or a list from the runtime is no result: said, with exit code 1."""
+    runtime.agent("default")
+    real = runtime.answer
+
+    def odd(method, url, body):
+        status, answer = real(method, url, body)
+        return (status, None) if "/memory" in url else (status, answer)
+
+    monkeypatch.setattr(runtime, "answer", odd)
+    for script, args in (
+        ("add", ("--agent", "default", "--content", "x")),
+        ("search", ("--agent", "default", "--query", "x")),
+        ("list", ("--agent", "default")),
+        ("delete", ("--agent", "default", "--id", "mem-1")),
+    ):
+        done = run(script, *args)
+        assert done.returncode == 1, (script, done.stdout)
+        assert "is not what was asked for" in done.stderr and "Traceback" not in done.stderr
