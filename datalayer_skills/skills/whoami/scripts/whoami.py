@@ -2,17 +2,27 @@
 #
 # BSD 3-Clause License
 
-"""Whoami script — fetch the authenticated user's Datalayer profile.
+"""Whoami script — the profile of the Datalayer account the agent runs for.
 
-Uses the ``datalayer_core`` high-level client to call the Datalayer IAM
-whoami endpoint and prints the user profile as JSON.
+In a Datalayer runtime the script holds no key: it asks the agent runtime it
+runs beside (``GET /api/v1/owner`` on the pod's loopback), which answers with
+the identity it holds for the account it runs for. No credential reaches the
+sandbox.
+
+Run by hand outside a runtime, with a key (``--api-key`` or
+``DATALAYER_API_KEY``), it asks Datalayer's IAM itself through the
+``datalayer_core`` client, as it always did.
 
 Usage:
-    python whoami.py [--run-url URL] [--api-key KEY]
+    python whoami.py                                  # in a runtime
+    python whoami.py --run-url URL --api-key KEY      # by hand, with a key
 
 Environment:
-    DATALAYER_RUN_URL  Base URL of the Datalayer platform.
-    DATALAYER_API_KEY  API key for authentication.
+    AGENT_RUNTIMES_URL       The agent runtime (default: the loopback).
+    AGENT_RUNTIMES_PORT      Its port on the loopback (default 8765).
+    AGENT_RUNTIMES_AGENT_ID  Which of the runtime's agents asks.
+    DATALAYER_API_KEY        A key, when run by hand outside a runtime.
+    DATALAYER_RUN_URL        The platform the key is of.
 """
 
 from __future__ import annotations
@@ -21,10 +31,72 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+#: The runtime's route that says who it runs for.
+ROUTE = "/api/v1/owner"
+
+
+class WhoamiRefused(Exception):
+    """Why nobody was said, in the runtime's sentence."""
+
+
+def runtime_url(explicit: str = "") -> str:
+    """The agent runtime's URL: given, AGENT_RUNTIMES_URL, else its port on the loopback."""
+    url = (explicit or os.environ.get("AGENT_RUNTIMES_URL", "")).strip()
+    if not url:
+        port = os.environ.get("AGENT_RUNTIMES_PORT", "").strip() or "8765"
+        url = f"http://127.0.0.1:{port}"
+    return url.rstrip("/")
+
+
+def whoami_from_runtime(base: str, agent: str = "") -> dict:
+    """Ask the agent runtime who it runs for; raise ``WhoamiRefused`` with its sentence."""
+    agent = (agent or os.environ.get("AGENT_RUNTIMES_AGENT_ID", "")).strip()
+    url = f"{base}{ROUTE}"
+    if agent:
+        url += "?" + urllib.parse.urlencode({"agent": agent})
+    request = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+    # Never through a proxy: the runtime is in this pod.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(request, timeout=30) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as error:
+        raw = error.read()
+        try:
+            detail = json.loads(raw or b"{}").get("detail") or ""
+        except (ValueError, AttributeError):
+            detail = raw.decode(errors="replace").strip()
+        if not isinstance(detail, str):
+            detail = json.dumps(detail)
+        raise WhoamiRefused(detail or f"The runtime answered {error.code}.") from error
+    except urllib.error.URLError as error:
+        raise WhoamiRefused(
+            f"The agent runtime at {base} cannot be reached ({error.reason}), and no key was "
+            "given: run it in a Datalayer runtime, or pass --api-key and --run-url."
+        ) from error
+    try:
+        profile = json.loads(raw or b"{}")
+    except ValueError as error:
+        raise WhoamiRefused("The runtime's answer is not JSON.") from error
+    if not isinstance(profile, dict):
+        raise WhoamiRefused("The runtime's answer is not a profile.")
+    return {
+        "handle": profile.get("handle"),
+        "email": profile.get("email"),
+        "first_name": profile.get("first_name"),
+        "last_name": profile.get("last_name"),
+        "uid": profile.get("uid"),
+        "roles": profile.get("roles") or [],
+        "avatar_url": profile.get("avatar_url"),
+    }
 
 
 def whoami(run_url: str, api_key: str) -> dict:
-    """Fetch the current user's profile from Datalayer IAM.
+    """Fetch the current user's profile from Datalayer IAM, with a key.
 
     Uses ``datalayer_core.client.client.DatalayerClient`` to call the
     IAM whoami endpoint.
@@ -64,33 +136,41 @@ def arguments(argv=None) -> argparse.Namespace:
         "--run_url",
         dest="run_url",
         default=os.environ.get("DATALAYER_RUN_URL", ""),
-        help="Datalayer platform URL (default: $DATALAYER_RUN_URL)",
+        help="Datalayer platform URL, with a key (default: $DATALAYER_RUN_URL)",
     )
     parser.add_argument(
         "--api-key",
         "--api_key",
         dest="api_key",
         default=os.environ.get("DATALAYER_API_KEY", ""),
-        help="API key (default: $DATALAYER_API_KEY)",
+        help="API key, outside a runtime (default: $DATALAYER_API_KEY)",
+    )
+    parser.add_argument(
+        "--runtime-url",
+        "--runtime_url",
+        dest="runtime_url",
+        default="",
+        help="The agent runtime (default: $AGENT_RUNTIMES_URL, else http://127.0.0.1:8765)",
+    )
+    parser.add_argument(
+        "--agent",
+        default="",
+        help="Which of the runtime's agents asks (default: $AGENT_RUNTIMES_AGENT_ID)",
     )
     return parser.parse_args(argv)
 
 
+def main(argv=None) -> dict:
+    """The profile: from IAM with a key and its platform when both are given, else from the runtime."""
+    args = arguments(argv)
+    if args.api_key and args.run_url:
+        return whoami(args.run_url, args.api_key)
+    return whoami_from_runtime(runtime_url(args.runtime_url), args.agent)
+
+
 if __name__ == "__main__":
-    args = arguments()
-
-    if not args.run_url:
-        print(
-            "Error: --run-url or DATALAYER_RUN_URL is required",
-            file=sys.stderr,
-        )
+    try:
+        print(json.dumps(main(), indent=2))
+    except WhoamiRefused as refusal:
+        print(f"Error: {refusal}", file=sys.stderr)
         sys.exit(1)
-    if not args.api_key:
-        print(
-            "Error: --api-key or DATALAYER_API_KEY is required",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    result = whoami(args.run_url, args.api_key)
-    print(json.dumps(result, indent=2))

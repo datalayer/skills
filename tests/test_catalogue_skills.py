@@ -91,8 +91,8 @@ CATALOGUE = {
 SCRIPT_NAMED = ("accounting", "image", "image-stock", "video")
 
 #: The skills whose SKILL.md says they are public (`metadata.visibility: public`) and that need no
-#: secret: what a company may publish to people's personal agents. `github` and `events` need a
-#: token: never public.
+#: secret: what a company may publish to people's personal agents. `github` needs a token and
+#: `events` acts as the account its runtime runs for: never public.
 PUBLIC = {
     "accounting",
     "crawl",
@@ -104,6 +104,11 @@ PUBLIC = {
     "fare-and-stay-comparison",
     "dining",
 }
+
+
+#: The skills that need no secret in the sandbox and are not public either: they act as the
+#: account their runtime runs for, which the runtime holds the identity of.
+ACTS_AS_ACCOUNT = {"events"}
 
 
 @pytest.mark.parametrize("name", sorted(CATALOGUE))
@@ -161,7 +166,7 @@ def test_a_public_skill_says_so_and_needs_no_secret(name: str) -> None:
         bool(declared.get_required_env_vars() or declared.get_any_of_env_vars()) == needs_a_secret
     )
     assert (skill.metadata.metadata.get("visibility") == "public") == (name in PUBLIC)
-    assert needs_a_secret == (name not in PUBLIC), name
+    assert needs_a_secret == (name not in PUBLIC and name not in ACTS_AS_ACCOUNT), name
 
 
 def test_the_text_summarizer_is_a_package_skill_too() -> None:

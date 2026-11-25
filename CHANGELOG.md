@@ -6,6 +6,14 @@
 
 # Changelog
 
+## 0.7.10
+
+25 November 2026.
+
+- **The skills that act as the account ask the runtime, not the sandbox, for the identity.** `datalayer-whoami` and `events` read `DATALAYER_API_KEY` from the sandbox's environment, where a Datalayer runtime puts none: the key is the platform's, and a runtime handed to a hosted application or kept running holds no key at all. Their scripts now ask the agent runtime they run beside, on the pod's loopback (`GET /api/v1/owner`, `/api/v1/owner/events`, agent-runtimes 1.8.7), as `datalayer-email` and `datalayer-library-publish` already did; the runtime acts with the identity it holds, and no credential reaches the sandbox. Neither skill requires a variable any more (`env.required` is gone from their `SKILL.md`), so both are offered in a runtime without a key, and a runtime that runs for nobody answers a sentence saying so. A runtime that serves an application to other people says its owner's public face: no email, no roles.
+- **By hand, the key still works.** With `DATALAYER_API_KEY` (and, for `datalayer-whoami`, `DATALAYER_RUN_URL`), a script run outside a runtime calls the platform itself, as before.
+- **`events` calls the events API where it is.** With a key it called `/api/ai-agents/v1/events` on a host AI Agents no longer runs on; it calls `/api/ai-agents/v1/agents/{agent_id}/events` on `https://r1.datalayer.run` (or `DATALAYER_AI_AGENTS_URL`), `get` and `update` take `agent_id`, and the script uses the standard library alone.
+
 ## 0.7.9
 
 25 November 2026.

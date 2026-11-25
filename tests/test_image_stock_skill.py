@@ -1453,8 +1453,11 @@ def test_the_doc_says_what_a_moved_folder_may_keep() -> None:
         assert said in text
 
 
-def test_whoami_activates_with_the_key_its_url_given_either_way() -> None:
+def test_whoami_activates_without_a_key_in_a_runtime() -> None:
+    """Nothing is required of the sandbox's environment: the runtime is asked."""
     text = (SCRIPTS.parents[1] / "whoami" / "SKILL.md").read_text()
     front = text.split("---")[1]
-    assert "required:\n    - DATALAYER_API_KEY\n  optional:\n    - DATALAYER_RUN_URL" in front
-    assert "Either one is enough" in text
+    assert "required:" not in front
+    assert "optional:\n    - AGENT_RUNTIMES_URL" in front
+    assert "- DATALAYER_API_KEY" in front and "- DATALAYER_RUN_URL" in front
+    assert "only to run the script by hand" in text
