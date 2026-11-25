@@ -29,6 +29,10 @@ MAX_SUBJECT = 150
 MAX_TEXT = 20_000
 
 
+#: The longest a script waits for an answer, in seconds.
+MAX_TIMEOUT_SECONDS = 600.0
+
+
 def timeout_seconds() -> float:
     """How long to wait for the runtime: $DATALAYER_EMAIL_TIMEOUT_SECONDS, else 60."""
     raw = os.environ.get("DATALAYER_EMAIL_TIMEOUT_SECONDS", "").strip()
@@ -38,9 +42,9 @@ def timeout_seconds() -> float:
         seconds = float(raw)
     except ValueError:
         seconds = 0.0
-    if not 0 < seconds < float("inf"):
+    if not 0 < seconds <= MAX_TIMEOUT_SECONDS:
         raise MailRefused(
-            f"DATALAYER_EMAIL_TIMEOUT_SECONDS is {raw!r}: give a number of seconds above 0. "
+            f"DATALAYER_EMAIL_TIMEOUT_SECONDS is {raw!r}: give a number of seconds above 0, 600 at most. "
             "Nothing was sent."
         )
     return seconds

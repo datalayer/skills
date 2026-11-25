@@ -39,6 +39,10 @@ class EventsRefused(Exception):
     """Why the events were not reached, in the runtime's or the API's sentence."""
 
 
+#: The longest a script waits for an answer, in seconds.
+MAX_TIMEOUT_SECONDS = 600.0
+
+
 def timeout_seconds() -> float:
     """How long to wait for an answer: $DATALAYER_EVENTS_TIMEOUT_SECONDS, else 30."""
     raw = os.environ.get("DATALAYER_EVENTS_TIMEOUT_SECONDS", "").strip()
@@ -48,9 +52,9 @@ def timeout_seconds() -> float:
         seconds = float(raw)
     except ValueError:
         seconds = 0.0
-    if not 0 < seconds < float("inf"):
+    if not 0 < seconds <= MAX_TIMEOUT_SECONDS:
         raise EventsRefused(
-            f"DATALAYER_EVENTS_TIMEOUT_SECONDS is {raw!r}: give a number of seconds above 0. "
+            f"DATALAYER_EVENTS_TIMEOUT_SECONDS is {raw!r}: give a number of seconds above 0, 600 at most. "
             "Nothing was sent."
         )
     return seconds

@@ -226,7 +226,7 @@ def test_agent_skills_discovers_it_with_its_script_and_no_secret() -> None:
     assert "email" in skill.tags
 
 
-@pytest.mark.parametrize("value", ["not-a-number", "0", "-3", "inf", "nan"])
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-3", "inf", "nan", "1e100", "601"])
 def test_a_timeout_that_is_no_number_of_seconds_refuses_before_anything_is_sent(
     monkeypatch, value
 ) -> None:

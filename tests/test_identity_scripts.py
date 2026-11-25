@@ -435,7 +435,7 @@ def test_every_script_that_sends_a_credential_follows_no_redirect() -> None:
 # ---- second review of 0.7.11 -------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value", ["not-a-number", "0", "-3", "inf", "nan"])
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-3", "inf", "nan", "1e100", "601"])
 def test_a_timeout_that_is_no_number_of_seconds_is_a_sentence(owner, monkeypatch, value) -> None:
     monkeypatch.setenv("DATALAYER_EVENTS_TIMEOUT_SECONDS", value)
     monkeypatch.setenv("DATALAYER_WHOAMI_TIMEOUT_SECONDS", value)
@@ -446,7 +446,7 @@ def test_a_timeout_that_is_no_number_of_seconds_is_a_sentence(owner, monkeypatch
     ):
         done = run(script, *args)
         assert done.returncode == 1 and "Traceback" not in done.stderr, done.stderr
-        assert done.stderr.startswith(f"Error: {name} is") and "above 0" in done.stderr
+        assert done.stderr.startswith(f"Error: {name} is") and "above 0, 600 at most" in done.stderr
     # Refused before anything was sent.
     assert owner.requests == []
 
