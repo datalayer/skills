@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.7.9
+
+25 November 2026.
+
+- **Every skill says what it does and when to use it.** `crawl`, `events`, `github`, `image`, `pdf`, `text-summarizer`, `video` and `datalayer-whoami` get a description in the shape of the others: what the skill does, in a sentence a person can read in a list of skills, then when to use it. `datalayer-whoami` names what its script returns (handle, name, email, roles, avatar). `pdf` gets the version, tags and author every other skill has. A page that lists an agent's skills takes each one's display name, icon and menu description from the agentspecs skills catalogue, which now has an entry for all nineteen, the four memory skills and `datalayer-whoami` included. A test holds each of the nineteen to a description of a sentence or two, tags, a version and an author.
+
 ## 0.7.8
 
 23 November 2026.

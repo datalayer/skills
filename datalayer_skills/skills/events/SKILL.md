@@ -1,6 +1,6 @@
 ---
 name: events
-description: Event API helper for create/get/list/update operations against the AI Agents events API. Requires DATALAYER_API_KEY.
+description: Create, read, list and update the agent's events on Datalayer, through the AI Agents events API. Use it when a task must record an event or follow the state of one. Requires DATALAYER_API_KEY.
 license: Proprietary. LICENSE.txt has complete terms
 version: 1.0.0
 tags:

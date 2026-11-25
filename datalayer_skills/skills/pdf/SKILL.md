@@ -1,7 +1,13 @@
 ---
 name: pdf
-description: PDF form-processing toolkit for checking fillable forms, extracting form field metadata, validating bounding boxes, converting pages to images, and filling forms.
+description: Check and fill PDF forms — find the fillable fields, read their metadata, fill them, turn pages into images, validate bounding boxes and place text where a form has no fields. Use it when the person hands you a PDF form to inspect or fill.
 license: Proprietary. LICENSE.txt has complete terms
+version: 1.0.0
+tags:
+  - pdf
+  - forms
+  - documents
+author: Datalayer
 metadata:
   visibility: public
 ---

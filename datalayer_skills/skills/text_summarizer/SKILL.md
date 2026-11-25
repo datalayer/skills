@@ -1,6 +1,6 @@
 ---
 name: text-summarizer
-description: Summarize text from a file or inline input. Use for concise summaries and key-point extraction.
+description: Summarize a text or a file into a few sentences or its key points. Use it when the person asks for a summary, the key points or a shorter version of a text.
 license: BSD-3-Clause
 version: 1.0.0
 tags:

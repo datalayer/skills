@@ -1,6 +1,6 @@
 ---
 name: datalayer-whoami
-description: Query the authenticated user's profile from the Datalayer IAM service. Requires a Datalayer account and API key. Returns user handle, email, roles, and linked accounts.
+description: Read the profile of the Datalayer account the agent runs for — its handle, name, email, roles and avatar — from Datalayer's IAM. Use it when the person asks who they are signed in as, or a task needs their identity. Requires DATALAYER_API_KEY.
 license: BSD-3-Clause
 version: 1.0.0
 tags:

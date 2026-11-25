@@ -74,3 +74,26 @@ def test_the_runtime_api_block_is_the_same_in_every_script() -> None:
         blocks[script.name] = text[text.index(start) : text.index(end)]
     assert len(blocks) == 5
     assert len(set(blocks.values())) == 1
+
+
+def test_every_skill_says_what_it_does_and_when_to_use_it() -> None:
+    """A page lists a skill by what its SKILL.md says where no catalogue names it, and a model
+    chooses it by the same sentence: each of the nineteen says what it does, in a sentence or
+    two, and when to use it, with a version, tags and an author."""
+    discovered = {skill.name: skill for skill in discover_entrypoint_skills()}
+    ours = _ours()
+    assert len(ours) == 19
+    for name in ours:
+        skill = discovered[name]
+        description = skill.description.strip()
+        assert 60 <= len(description) <= 420, name
+        assert description.endswith("."), name
+        assert skill.tags, name
+        front_matter = (
+            (Path(__file__).resolve().parents[1].joinpath(*ours[name].split("."), "SKILL.md"))
+            .read_text()
+            .split("---")[1]
+        )
+        assert f"\nname: {name}\n" in front_matter, name
+        assert "\nversion: " in front_matter, name
+        assert "\nauthor: Datalayer" in front_matter, name
