@@ -71,16 +71,16 @@ def publish_item(
             detail = detail.get("message") or json.dumps(detail)
         raise RuntimeError(detail or f"The runtime answered {error.code}.") from error
     except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
-        reason = getattr(error, "reason", None)
-        if isinstance(reason, ConnectionRefusedError):
-            raise RuntimeError(
-                f"The agent runtime at {base} cannot be reached: nothing was published."
-            ) from error
-        raise RuntimeError(
-            f"The agent runtime at {base} did not confirm the publication "
+        # A connection never made sent nothing; anything later may have published.
+        never_sent = isinstance(getattr(error, "reason", None), ConnectionRefusedError)
+        why = (
+            f"The agent runtime at {base} cannot be reached: nothing was published."
+            if never_sent
+            else f"The agent runtime at {base} did not confirm the publication "
             f"({type(error).__name__}): the item may be public already. Check its public page "
             "before publishing it again."
-        ) from error
+        )
+        raise RuntimeError(why) from error
 
 
 def main() -> None:
