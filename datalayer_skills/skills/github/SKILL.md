@@ -1,6 +1,6 @@
 ---
 name: github
-description: GitHub API scripts for repository discovery and inspection. Use this skill when listing your repos, inspecting one repo, or listing issues/PRs. Requires GITHUB_TOKEN.
+description: List and search GitHub repositories, inspect one, and list its issues and pull requests. Use it when the person asks about their repositories, one repository, its issues or its pull requests. Requires GITHUB_TOKEN.
 license: Proprietary. LICENSE.txt has complete terms
 version: 1.0.0
 tags:

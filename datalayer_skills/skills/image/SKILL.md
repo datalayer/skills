@@ -1,6 +1,6 @@
 ---
 name: image
-description: Image toolkit for snapshots of web pages and video frames, and images read, resized, cropped, converted, optimized for the web and thumbnailed.
+description: Take snapshots of web pages and video frames, and read, resize, crop, convert, optimize for the web and thumbnail images. Use it when a task needs a screenshot or an image changed.
 license: BSD 3-Clause. LICENSE has complete terms
 version: 1.0.0
 tags:

@@ -1,6 +1,6 @@
 ---
 name: video
-description: Video toolkit for recordings of web pages zoomed in and out as an MP4 ready to share and kept in the person's Datalayer Space, and videos read, trimmed, zoomed in and out on a point, transcoded, optimized for the web, thumbnailed, turned to GIF and joined.
+description: Record web pages zoomed in and out as an MP4 ready to share and kept in the person's Datalayer Space, and read, trim, zoom in and out on a point, transcode, optimize for the web, thumbnail, turn to GIF and join videos. Use it when a task needs a recording of a page or a video changed.
 license: BSD 3-Clause. LICENSE has complete terms
 version: 1.2.0
 tags:

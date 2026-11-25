@@ -1,6 +1,6 @@
 ---
 name: crawl
-description: Web crawling and extraction scripts for HTML pages, JS-rendered pages, links, tables, robots policy, and site crawling.
+description: Fetch web pages, JavaScript-rendered ones included, extract their text, links and tables, check a site's robots rules and crawl it. Use it when the person asks to read, scrape or crawl a page or a site.
 license: Proprietary. LICENSE.txt has complete terms
 version: 1.0.0
 tags:
