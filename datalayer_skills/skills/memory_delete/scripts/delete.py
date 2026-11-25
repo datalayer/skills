@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import sys
@@ -54,23 +55,38 @@ def call(method: str, url: str, body: dict | None = None) -> dict:
         headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    where = url.split("/api/")[0]
     try:
         with opener.open(request, timeout=30) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
-        raw = error.read()
+        try:
+            raw = error.read()
+        except (OSError, http.client.HTTPException):
+            raw = b""
         try:
             detail = json.loads(raw or b"{}").get("detail") or ""
-        except ValueError:
+        except (ValueError, AttributeError):
             detail = raw.decode(errors="replace").strip()
         if not isinstance(detail, str):
             detail = json.dumps(detail)
         raise MemoryRefused(detail or f"The runtime answered {error.code}.") from error
     except urllib.error.URLError as error:
         raise MemoryRefused(
-            f"The agent runtime at {url.split('/api/')[0]} cannot be reached: {error.reason}."
+            f"The agent runtime at {where} cannot be reached: {error.reason}."
         ) from error
-    return json.loads(raw or b"{}")
+    except (OSError, http.client.HTTPException) as error:
+        # A timeout, a dropped connection, an answer cut short: what was asked
+        # may have been done all the same.
+        raise MemoryRefused(
+            f"The connection to the agent runtime at {where} ended before its answer "
+            f"({type(error).__name__}): check the memory before doing it again."
+        ) from error
+    try:
+        answer = json.loads(raw or b"{}")
+    except ValueError as error:
+        raise MemoryRefused(f"The answer of the agent runtime at {where} is not JSON.") from error
+    return answer if isinstance(answer, dict) else {}
 
 
 def agent_name(base: str, explicit: str = "") -> str:

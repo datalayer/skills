@@ -16,6 +16,7 @@ Run by hand outside a runtime, with a key (``DATALAYER_API_KEY``), it calls
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import sys
@@ -36,6 +37,12 @@ DEFAULT_AI_AGENTS_URL = "https://r1.datalayer.run"
 
 class EventsRefused(Exception):
     """Why the events were not reached, in the runtime's or the API's sentence."""
+
+
+def timeout_seconds() -> float:
+    """How long to wait for an answer: $DATALAYER_EVENTS_TIMEOUT_SECONDS, else 30."""
+    raw = os.environ.get("DATALAYER_EVENTS_TIMEOUT_SECONDS", "").strip()
+    return float(raw) if raw else 30.0
 
 
 def _base_url() -> str:
@@ -61,6 +68,42 @@ def _agent(agent_id: str | None) -> str:
     return (agent_id or os.environ.get("AGENT_RUNTIMES_AGENT_ID", "")).strip()
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """No request follows a redirect: a key goes to the host it was sent to alone."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        host = urllib.parse.urlsplit(newurl).netloc or "another address"
+        raise EventsRefused(
+            f"{urllib.parse.urlsplit(req.full_url).netloc} answered with a redirect to {host} "
+            f"({code}), which is not followed: nothing was sent there."
+        )
+
+
+#: The hosts a request may reach over plain HTTP: this machine alone.
+LOOPBACK = ("127.0.0.1", "localhost", "::1")
+
+
+def _checked(url: str, key: str) -> None:
+    """A key travels over HTTPS alone; plain HTTP is for the runtime on the loopback."""
+    parts = urllib.parse.urlsplit(url)
+    if key and parts.scheme != "https" and (parts.hostname or "") not in LOOPBACK:
+        raise EventsRefused(
+            f"DATALAYER_API_KEY is not sent over {parts.scheme or 'an unknown scheme'} to "
+            f"{parts.netloc}: name an https:// address in DATALAYER_AI_AGENTS_URL."
+        )
+
+
+def _unconfirmed(method: str, why: str) -> EventsRefused:
+    """A transport failure, said; a write may have been made all the same."""
+    if method in ("POST", "PATCH"):
+        return EventsRefused(
+            f"{why} The event may already have been "
+            f"{'created' if method == 'POST' else 'updated'}: check with `list` or `get` "
+            "before doing it again."
+        )
+    return EventsRefused(why)
+
+
 def _call(
     method: str,
     url: str,
@@ -69,7 +112,12 @@ def _call(
     params: dict[str, Any] | None = None,
     key: str = "",
 ) -> dict[str, Any]:
-    """One request, with a key when one is given; a refusal raises ``EventsRefused``."""
+    """One request, with a key when one is given; a refusal raises ``EventsRefused``.
+
+    Never followed through a redirect, and never retried: a key reaches the
+    one host it was sent to, and a write is made once.
+    """
+    _checked(url, key)
     if params:
         url += "?" + urllib.parse.urlencode(params)
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
@@ -81,18 +129,25 @@ def _call(
         method=method,
         headers=headers,
     )
+    where = url.split("/api/")[0]
     # The runtime is in this pod: never through a proxy. With a key, as the
     # environment says.
-    opener = (
-        urllib.request.build_opener()
-        if key
-        else urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    )
+    handlers: list[Any] = [NoRedirect()]
+    if not key:
+        handlers.append(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(*handlers)
     try:
-        with opener.open(request, timeout=30) as response:
+        with opener.open(request, timeout=timeout_seconds()) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
-        raw = error.read()
+        try:
+            raw = error.read()
+        except (OSError, http.client.HTTPException) as cut:
+            raise _unconfirmed(
+                method,
+                f"{where} answered {error.code} and its answer was cut short "
+                f"({type(cut).__name__}).",
+            ) from cut
         try:
             detail = json.loads(raw or b"{}").get("detail") or ""
         except (ValueError, AttributeError):
@@ -101,17 +156,25 @@ def _call(
             detail = json.dumps(detail)
         raise EventsRefused(detail or f"The events API answered {error.code}.") from error
     except urllib.error.URLError as error:
-        where = url.split("/api/")[0]
-        if key:
-            raise EventsRefused(f"{where} cannot be reached: {error.reason}.") from error
-        raise EventsRefused(
-            f"The agent runtime at {where} cannot be reached ({error.reason}), and no key was "
-            "given: run it in a Datalayer runtime, or set DATALAYER_API_KEY."
+        reason = error.reason
+        if isinstance(reason, ConnectionRefusedError):
+            # Nothing was sent: the connection was never made.
+            if key:
+                raise EventsRefused(f"{where} cannot be reached: {reason}.") from error
+            raise EventsRefused(
+                f"The agent runtime at {where} cannot be reached ({reason}), and no key was "
+                "given: run it in a Datalayer runtime, or set DATALAYER_API_KEY."
+            ) from error
+        raise _unconfirmed(method, f"{where} did not answer ({reason}).") from error
+    except (OSError, http.client.HTTPException) as error:
+        # A timeout, a dropped connection, an answer cut short.
+        raise _unconfirmed(
+            method, f"The connection to {where} ended before its answer ({type(error).__name__})."
         ) from error
     try:
         answer = json.loads(raw or b"{}")
     except ValueError as error:
-        raise EventsRefused("The answer is not JSON.") from error
+        raise _unconfirmed(method, f"The answer of {where} is not JSON.") from error
     return answer if isinstance(answer, dict) else {}
 
 

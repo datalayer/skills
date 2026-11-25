@@ -255,3 +255,178 @@ def test_neither_skill_requires_a_variable_of_the_sandbox() -> None:
         front = (SKILLS / skill / "SKILL.md").read_text().split("---")[1]
         assert "required:" not in front, skill
         assert "DATALAYER_API_KEY" in front, skill
+
+
+# ---- a key goes to one host, and a failure is a sentence (review of 0.7.10) --------------------
+
+
+class _Recorder:
+    """A local server: what it was sent, and what it answers."""
+
+    def __init__(self, respond) -> None:
+        self.seen: list[dict[str, str]] = []
+        recorder = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def _serve(self) -> None:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length:
+                    self.rfile.read(length)
+                recorder.seen.append({key.lower(): value for key, value in self.headers.items()})
+                respond(self)
+
+            do_GET = do_POST = do_PATCH = _serve
+
+            def log_message(self, *args: Any) -> None:  # quiet
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def close(self) -> None:
+        self.server.shutdown()
+
+
+def _json(handler, status: int, body: dict) -> None:
+    data = json.dumps(body).encode()
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
+@pytest.fixture
+def two_servers():
+    """A server that redirects every request to a second one, which records what reaches it."""
+    second = _Recorder(lambda handler: _json(handler, 200, {"event": {"id": "stolen"}, **PROFILE}))
+
+    def redirect(handler) -> None:
+        handler.send_response(307)
+        handler.send_header("Location", second.url + handler.path)
+        handler.send_header("Content-Length", "0")
+        handler.end_headers()
+
+    first = _Recorder(redirect)
+    try:
+        yield first, second
+    finally:
+        first.close()
+        second.close()
+
+
+def test_a_keyed_events_request_follows_no_redirect(two_servers, monkeypatch) -> None:
+    """The key was sent to the first host: it reaches no other, whatever that host answers."""
+    first, second = two_servers
+    monkeypatch.setenv("DATALAYER_API_KEY", "the-key")
+    monkeypatch.setenv("DATALAYER_AI_AGENTS_URL", first.url)
+    for args in (
+        ("list", "--agent-id", "a"),
+        ("get", "evt-1", "--agent-id", "a"),
+        ("create", "--agent-id", "a", "--title", "t"),
+        ("update", "evt-1", "--agent-id", "a", "--status", "completed"),
+    ):
+        done = run(EVENT, *args)
+        assert done.returncode == 1, args
+        assert "redirect" in done.stderr and "not followed" in done.stderr, done.stderr
+        assert "the-key" not in done.stderr and "Traceback" not in done.stderr
+    assert len(first.seen) == 4 and all(h["authorization"] == "Bearer the-key" for h in first.seen)
+    assert second.seen == []
+
+
+def test_a_runtime_call_follows_no_redirect_either(two_servers, monkeypatch) -> None:
+    first, second = two_servers
+    monkeypatch.setenv("AGENT_RUNTIMES_URL", first.url)
+    for name in ("DATALAYER_API_KEY", "DATALAYER_RUN_URL", "AGENT_RUNTIMES_AGENT_ID"):
+        monkeypatch.delenv(name, raising=False)
+    for script, args in ((WHOAMI, ()), (EVENT, ("list",))):
+        done = run(script, *args)
+        assert done.returncode == 1 and "not followed" in done.stderr, done.stderr
+        assert "Traceback" not in done.stderr
+    assert second.seen == []
+
+
+def test_a_key_is_never_sent_over_plain_http_to_another_machine(monkeypatch) -> None:
+    monkeypatch.setenv("DATALAYER_API_KEY", "the-key")
+    monkeypatch.setenv("DATALAYER_AI_AGENTS_URL", "http://ai-agents.example")
+    done = run(EVENT, "list", "--agent-id", "a")
+    assert done.returncode == 1
+    assert "is not sent over http" in done.stderr and "https://" in done.stderr
+    assert "the-key" not in done.stderr
+
+
+def _stalled(handler) -> None:
+    import time
+
+    time.sleep(3)
+
+
+def _cut_short(handler) -> None:
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", "500")
+    handler.end_headers()
+    handler.wfile.write(b'{"event": ')
+    handler.wfile.flush()
+    handler.connection.close()
+
+
+def _cut_short_refusal(handler) -> None:
+    handler.send_response(409)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", "500")
+    handler.end_headers()
+    handler.wfile.write(b'{"detail": ')
+    handler.wfile.flush()
+    handler.connection.close()
+
+
+@pytest.mark.parametrize("respond", [_stalled, _cut_short, _cut_short_refusal])
+def test_a_stalled_or_truncated_answer_is_a_sentence_never_a_traceback(
+    respond, monkeypatch
+) -> None:
+    server = _Recorder(respond)
+    try:
+        monkeypatch.setenv("AGENT_RUNTIMES_URL", server.url)
+        monkeypatch.setenv("DATALAYER_EVENTS_TIMEOUT_SECONDS", "1")
+        monkeypatch.setenv("DATALAYER_WHOAMI_TIMEOUT_SECONDS", "1")
+        for name in ("DATALAYER_API_KEY", "DATALAYER_RUN_URL", "AGENT_RUNTIMES_AGENT_ID"):
+            monkeypatch.delenv(name, raising=False)
+        who = run(WHOAMI)
+        assert who.returncode == 1 and who.stderr.startswith("Error: "), who.stderr
+        assert "Traceback" not in who.stderr
+        read = run(EVENT, "list")
+        assert read.returncode == 1 and read.stderr.startswith("Error: "), read.stderr
+        assert "Traceback" not in read.stderr and "may already" not in read.stderr
+        # A write whose answer never came may have been made: said, and not sent again.
+        before = len(server.seen)
+        for args in (
+            ("create", "--agent-id", "a", "--title", "t"),
+            ("update", "evt-1", "--status", "completed"),
+        ):
+            wrote = run(EVENT, *args)
+            assert wrote.returncode == 1 and "Traceback" not in wrote.stderr, wrote.stderr
+            assert "may already have been" in wrote.stderr, wrote.stderr
+        assert len(server.seen) == before + 2
+    finally:
+        server.close()
+
+
+def test_every_script_that_sends_a_credential_follows_no_redirect() -> None:
+    """Each script is its own file in the sandbox: each one that puts a key in a header with
+    urllib builds its opener with a handler that follows no redirect."""
+    import re
+
+    keyed = re.compile(r"Authorization|api-key|Bearer |Client-ID ")
+    checked = []
+    for script in sorted(SKILLS.glob("*/scripts/*.py")):
+        text = script.read_text()
+        if "urllib.request" not in text or not keyed.search(text):
+            continue
+        checked.append(script.parent.parent.name)
+        assert "HTTPRedirectHandler" in text, script
+        for found in re.finditer(r"build_opener\(", text):
+            opener = text[found.end() : found.end() + 200].split("\n\n")[0]
+            assert re.search(r"NoRedirect|handlers|Checked", opener), (script, opener)
+    assert "events" in checked and "image_stock" in checked
