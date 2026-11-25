@@ -169,6 +169,30 @@ def test_a_public_skill_says_so_and_needs_no_secret(name: str) -> None:
     assert needs_a_secret == (name not in PUBLIC and name not in ACTS_AS_ACCOUNT), name
 
 
+def test_crawl_reads_no_key() -> None:
+    """The crawl skill fetches pages itself: none of its scripts reads a variable, Tavily's least of all.
+
+    The catalogue listed ``TAVILY_API_KEY`` on it until 25 November 2026; nothing here ever read it
+    (web search is the ``tavily`` MCP server's). Held so that a key is not asked for again
+    without a script that reads one, and its SKILL.md saying so.
+    """
+    import ast
+
+    text = (SKILLS / "crawl" / "SKILL.md").read_text()
+    assert "- None required." in text
+    assert "TAVILY" not in text.upper()
+    declared = AgentSkill.from_module("datalayer_skills.skills.crawl")
+    assert not declared.get_required_env_vars() and not declared.get_any_of_env_vars()
+    for path in sorted((SKILLS / "crawl").rglob("*.py")):
+        source = path.read_text()
+        assert "TAVILY" not in source.upper(), path.name
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Attribute):
+                assert node.attr not in ("environ", "getenv"), f"{path.name} reads the environment"
+            if isinstance(node, ast.Name):
+                assert node.id != "getenv", f"{path.name} reads the environment"
+
+
 def test_the_text_summarizer_is_a_package_skill_too() -> None:
     from datalayer_skills.skills.text_summarizer import summarize_text
 
