@@ -224,3 +224,34 @@ def test_agent_skills_discovers_it_with_its_script_and_no_secret() -> None:
     assert [script.name for script in skill.scripts] == ["send_email"]
     assert skill.get_required_env_vars() == []
     assert "email" in skill.tags
+
+
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-3", "inf", "nan"])
+def test_a_timeout_that_is_no_number_of_seconds_refuses_before_anything_is_sent(
+    monkeypatch, value
+) -> None:
+    """A misconfigured setting is the script's own refusal (exit code 1), never a traceback."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "datalayer_skills"
+        / "skills"
+        / "email"
+        / "scripts"
+        / "send_email.py"
+    )
+    monkeypatch.setenv("DATALAYER_EMAIL_TIMEOUT_SECONDS", value)
+    monkeypatch.setenv("AGENT_RUNTIMES_URL", "http://127.0.0.1:9")
+    done = subprocess.run(
+        [sys.executable, str(script), "--subject", "s", "--text", "t"],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=60,
+    )
+    assert done.returncode == 1, done.stderr
+    assert done.stderr.startswith("Error: DATALAYER_EMAIL_TIMEOUT_SECONDS is")
+    assert "Nothing was sent" in done.stderr and "Traceback" not in done.stderr

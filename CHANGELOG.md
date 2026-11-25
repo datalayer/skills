@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.7.12
+
+25 November 2026.
+
+- **`datalayer-email`'s timeout setting is held to a number too.** `DATALAYER_EMAIL_TIMEOUT_SECONDS` set to something that is no number of seconds above 0 ended in a traceback; it is refused in a sentence before anything is sent, as the events and whoami settings are since 0.7.11.
+
 ## 0.7.11
 
 25 November 2026. Review of 0.7.10.
