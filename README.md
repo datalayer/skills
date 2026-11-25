@@ -46,7 +46,7 @@ loads them from the entry points, with no skill spec of their own.
 
 | Skill | Scripts | What it does |
 |-------|---------|--------------|
-| `datalayer-whoami` | `whoami` | The authenticated user's profile from Datalayer IAM |
+| `datalayer-whoami` | `whoami` | The profile of the account the agent runs for, asked of its runtime: no key in the sandbox |
 | `datalayer-memory-add` | `add` | Keep one thing in the person's memory of the agent, in their words |
 | `datalayer-memory-search` | `search` | The memories closest to a query |
 | `datalayer-memory-list` | `list_memories` | Every memory, newest first, with its id |
@@ -55,7 +55,7 @@ loads them from the entry points, with no skill spec of their own.
 | `datalayer-library-publish` | `publish_item` | Publish one owned notebook, document, deck, spreadsheet, cell or other current artifact in the public Library, after explicit confirmation |
 | `accounting` | `reconcile`, `variance`, `aging`, `close_summary` | Two ledgers reconciled, two periods compared, open invoices aged, a trial balance closed, over CSV exports |
 | `crawl` | `fetch_page`, `fetch_js_page`, `extract_links`, `extract_tables`, `crawl_site`, `check_robots` | Pages fetched (rendered when they need JavaScript), their links and tables, a site walked within its robots.txt |
-| `events` | `event` | Events of an agent created, read, listed and updated |
+| `events` | `event` | Events of an agent created, read, listed and updated, through its runtime: no key in the sandbox |
 | `github` | `list_repos`, `get_repo`, `list_issues`, `list_prs`, `search_repos` | Repositories, issues and pull requests read from GitHub (needs a token) |
 | `image` | `image_info`, `resize_image`, `crop_image`, `convert_image`, `optimize_image`, `thumbnail_image`, `snapshot_page`, `snapshot_video_frame` | Snapshots of pages and video frames; images read, resized, cropped, converted, optimized and thumbnailed |
 | `image-stock` | `list_providers`, `search_images`, `image_attribution`, `download_image` | Stock photos searched on Unsplash, Pexels, Pixabay and Freepik (the ones a key is set for), the credit line each asks for, a photo downloaded into the workspace |
@@ -72,10 +72,21 @@ under the same skill names, and agent-skills is the framework alone.
 
 A skill says in its `SKILL.md` frontmatter (`env`) which environment variables
 it reads, and agent-skills (1.5.0 and later) offers it to an agent only when it
-has what it needs: `github` needs `GITHUB_TOKEN`, `events` and
-`datalayer-whoami` need `DATALAYER_API_KEY`, and `image-stock` needs one key at
-least among its providers'. A skill without its environment is not listed and
-cannot be run.
+has what it needs: `github` needs `GITHUB_TOKEN`, and `image-stock` needs one
+key at least among its providers'. A skill without its environment is not
+listed and cannot be run.
+
+## The skills that act as the account
+
+`datalayer-whoami`, `events`, `datalayer-email` and `datalayer-library-publish`
+act as the Datalayer account their agent runs for, and none of them reads a key
+from the sandbox: each script asks the agent runtime it runs beside, on the
+pod's loopback, and the runtime acts with the identity it holds (agent-runtimes
+1.8.7 and later for `datalayer-whoami` and `events`: `GET /api/v1/owner`,
+`/api/v1/owner/events`). Whether such a skill can work is therefore the
+runtime's to say, and it does: a runtime that runs for nobody reports the skill
+as not ready, with the reason. `DATALAYER_API_KEY` is read only when
+`datalayer-whoami` or `events` is run by hand outside a runtime.
 
 ## Stock images
 
