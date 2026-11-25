@@ -32,7 +32,18 @@ MAX_TEXT = 20_000
 def timeout_seconds() -> float:
     """How long to wait for the runtime: $DATALAYER_EMAIL_TIMEOUT_SECONDS, else 60."""
     raw = os.environ.get("DATALAYER_EMAIL_TIMEOUT_SECONDS", "").strip()
-    return float(raw) if raw else 60.0
+    if not raw:
+        return 60.0
+    try:
+        seconds = float(raw)
+    except ValueError:
+        seconds = 0.0
+    if not 0 < seconds < float("inf"):
+        raise MailRefused(
+            f"DATALAYER_EMAIL_TIMEOUT_SECONDS is {raw!r}: give a number of seconds above 0. "
+            "Nothing was sent."
+        )
+    return seconds
 
 
 class MailRefused(Exception):
@@ -90,8 +101,9 @@ def send_email(subject: str, text: str, base: str) -> dict:
     )
     # Never through a proxy: the runtime is in this pod.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    timeout = timeout_seconds()
     try:
-        with opener.open(request, timeout=timeout_seconds()) as response:
+        with opener.open(request, timeout=timeout) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
         try:
