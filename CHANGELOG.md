@@ -6,6 +6,12 @@
 
 # Changelog
 
+## 0.7.13
+
+25 November 2026. Review of 0.7.12.
+
+- **A timeout setting is at most 600 seconds.** A finite value a socket cannot take (`1e100`) passed the check and ended in an `OverflowError`: `DATALAYER_EMAIL_TIMEOUT_SECONDS`, `DATALAYER_EVENTS_TIMEOUT_SECONDS` and `DATALAYER_WHOAMI_TIMEOUT_SECONDS` are refused above 600, in the same sentence, before anything is sent.
+
 ## 0.7.12
 
 25 November 2026.
