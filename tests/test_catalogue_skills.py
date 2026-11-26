@@ -176,21 +176,61 @@ def test_crawl_reads_no_key() -> None:
     (web search is the ``tavily`` MCP server's). Held so that a key is not asked for again
     without a script that reads one, and its SKILL.md saying so.
     """
-    import ast
 
     text = (SKILLS / "crawl" / "SKILL.md").read_text()
     assert "- None required." in text
     assert "TAVILY" not in text.upper()
     declared = AgentSkill.from_module("datalayer_skills.skills.crawl")
-    assert not declared.get_required_env_vars() and not declared.get_any_of_env_vars()
+    # No variable at all: required, one-of, or optional.
+    assert not declared.get_required_env_vars()
+    assert not declared.get_any_of_env_vars()
+    assert not declared.get_optional_env_vars()
     for path in sorted((SKILLS / "crawl").rglob("*.py")):
         source = path.read_text()
         assert "TAVILY" not in source.upper(), path.name
-        for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Attribute):
-                assert node.attr not in ("environ", "getenv"), f"{path.name} reads the environment"
-            if isinstance(node, ast.Name):
-                assert node.id != "getenv", f"{path.name} reads the environment"
+        assert not _reads_the_environment(source), f"{path.name} reads the environment"
+
+
+def _reads_the_environment(source: str) -> bool:
+    """Whether a script reads a process variable: `os.environ`, `os.getenv`, `os.environb`, or
+    any of them imported from `os` (aliased or not) and then used."""
+    import ast
+
+    readers = {"environ", "environb", "getenv", "getenvb"}
+    tree = ast.parse(source)
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "os":
+            for alias in node.names:
+                if alias.name in readers or alias.name == "*":
+                    imported.add(alias.asname or alias.name)
+    if "*" in imported:
+        return True
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in readers:
+            return True
+        if isinstance(node, ast.Name) and node.id in imported:
+            return True
+    return False
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import os\nos.environ.get('K')",
+        "import os\nos.getenv('K')",
+        "from os import environ\nkey = environ.get('CRAWL_API_KEY')",
+        "from os import environ as env\nenv['K']",
+        "from os import getenv as read\nread('K')",
+        "from os import *\ngetenv('K')",
+    ],
+)
+def test_the_environment_guard_sees_every_form(source: str) -> None:
+    assert _reads_the_environment(source)
+
+
+def test_the_environment_guard_passes_a_script_that_reads_none() -> None:
+    assert not _reads_the_environment("import os\nprint(os.path.join('a', 'b'))")
 
 
 def test_the_text_summarizer_is_a_package_skill_too() -> None:
